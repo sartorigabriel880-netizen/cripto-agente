@@ -128,6 +128,24 @@ VERDE, VERMELHO, NEUTRO = "#16C784", "#EA3943", "#616E85"
 AZUL, LARANJA, ROXO = "#3861FB", "#F7931A", "#A66BFF"
 SETA = {"cima": "⬆️", "baixo": "⬇️", "ambiguo": "↔️", "indefinido": "❓"}
 
+# Intervalos suportados pela Binance (mesmos códigos da API de klines).
+INTERVALOS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h",
+              "12h", "1d", "3d", "1w", "1M"]
+INTERVALOS_LABEL = {
+    "1m": "1 minuto", "3m": "3 minutos", "5m": "5 minutos", "15m": "15 minutos",
+    "30m": "30 minutos", "1h": "1 hora", "2h": "2 horas", "4h": "4 horas",
+    "6h": "6 horas", "8h": "8 horas", "12h": "12 horas", "1d": "1 dia",
+    "3d": "3 dias", "1w": "1 semana", "1M": "1 mês"}
+
+
+def _frase_alvo(intervalo, horizonte):
+    """Frase do que está sendo previsto, ligada ao intervalo (a vela seguinte)."""
+    lbl = INTERVALOS_LABEL.get(intervalo, intervalo)
+    if horizonte <= 1:
+        return f"a próxima vela de {lbl}"
+    return f"as próximas {horizonte} velas de {lbl}"
+
+
 POPULARES = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT", "ADAUSDT",
              "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "DOTUSDT"]
 
@@ -185,17 +203,17 @@ with st.sidebar:
              "cotado em dólar (BTCUSDT = Bitcoin, ETHUSDT = Ethereum…).")
     st.caption(f"{len(lista_ativos)} pares disponíveis")
     intervalo = st.selectbox(
-        "Intervalo", ["1d", "4h", "1h", "15m"], index=0,
-        help="O tempo que cada vela (candle) do gráfico representa. "
-             "1d = 1 dia por vela, 4h = 4 horas, 1h = 1 hora, 15m = 15 minutos. "
-             "Intervalos menores reagem mais rápido às mudanças, mas têm mais "
-             "ruído; maiores mostram a tendência de fundo.")
+        "Intervalo (vela da Binance)", INTERVALOS, index=INTERVALOS.index("1d"),
+        help="O tamanho de cada vela — os MESMOS intervalos da Binance "
+             "(1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w, 1M…). A análise prevê a "
+             "PRÓXIMA vela desse intervalo: escolha 15m e ela olha a próxima "
+             "vela de 15 minutos. Menores reagem rápido mas têm mais ruído.")
     horizonte = st.number_input(
-        "Horizonte (períodos à frente)", 1, 30, 1,
-        help="Quantos períodos à frente a análise tenta enxergar — e cada "
-             "período tem o tamanho do Intervalo acima. Ex.: horizonte 1 com "
-             "intervalo 1d = previsão para o próximo dia; horizonte 3 com 4h = "
-             "as próximas 12 horas. Quanto maior o horizonte, mais incerto.")
+        "Quantas velas à frente prever", 1, 30, 1,
+        help="Quantas velas do intervalo escolhido prever. 1 = a próxima vela "
+             "(o padrão). Ex.: intervalo 15m + 1 = próxima vela de 15 min; "
+             "15m + 4 = daqui a 4 velas (1 hora). Quanto mais à frente, mais incerto.")
+    st.caption(f"→ Vai analisar **{_frase_alvo(intervalo, int(horizonte))}**.")
     pontos = st.select_slider(
         "Pontos no gráfico", options=[30, 60, 120], value=60,
         help="Quantos períodos recentes mostrar no gráfico de preço.")
@@ -322,10 +340,11 @@ with tab_det:
         if usar_tecnica and vt.get("dados_sinteticos"):
             st.warning("MODO TESTE: dados sintéticos — não refletem o mercado real.")
 
-        topo = f"Veredito final — {ativo}"
+        st.subheader(f"Veredito final — {ativo}")
+        legenda = f"Prevendo **{_frase_alvo(intervalo, int(horizonte))}**."
         if usar_tecnica and vt.get("ultimo_candle"):
-            topo += f"  ·  vela mais recente: {vt['ultimo_candle']} (UTC)"
-        st.subheader(topo)
+            legenda += f"  ·  Vela mais recente: {vt['ultimo_candle']} (UTC)."
+        st.caption(legenda)
 
         cor_dir = COR_DIR.get(final["direcao"], "#0D1421")
         c1, c2, c3 = st.columns(3)

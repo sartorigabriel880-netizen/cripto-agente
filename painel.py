@@ -124,19 +124,32 @@ st.title("📊 Agente de análise de cripto")
 st.caption("Macro + notícias + técnica num veredito só. "
            "Ferramenta de pesquisa — não é sinal de trade.")
 
+POPULARES = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT", "ADAUSDT",
+             "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "DOTUSDT"]
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _ativos_disponiveis():
+    """Lista de pares USDT da Binance (cacheada 1h), com os populares no topo."""
+    from dados_binance import listar_pares_usdt
+    pares = listar_pares_usdt()
+    if not pares:
+        return POPULARES  # fallback se a busca falhar
+    topo = [p for p in POPULARES if p in pares]
+    resto = [p for p in pares if p not in POPULARES]
+    return topo + resto
+
+
 with st.sidebar:
     st.header("Configurar análise")
+    lista_ativos = _ativos_disponiveis()
     ativo = st.selectbox(
-        "Ativo", ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "Outro..."],
-        help="Qual criptomoeda analisar. O par termina em USDT porque o preço é "
-             "cotado em dólar — ex.: BTCUSDT = Bitcoin, ETHUSDT = Ethereum, "
-             "SOLUSDT = Solana, XRPUSDT = XRP. Escolha 'Outro...' para digitar "
-             "qualquer outro par disponível na Binance (ex.: ADAUSDT).")
-    if ativo == "Outro...":
-        ativo = st.text_input(
-            "Digite o par (ex.: ADAUSDT)", "BTCUSDT",
-            help="Use o formato MOEDA+USDT, tudo junto e em maiúsculas, "
-                 "exatamente como na Binance. Ex.: ADAUSDT, DOGEUSDT, BNBUSDT.").upper()
+        "Ativo", lista_ativos,
+        help="Qual criptomoeda analisar — a lista traz TODOS os pares USDT da "
+             "Binance (os mais conhecidos no topo). Digite para buscar, ex.: "
+             "'ADA', 'DOGE', 'PEPE'. O par termina em USDT porque o preço é "
+             "cotado em dólar (BTCUSDT = Bitcoin, ETHUSDT = Ethereum…).")
+    st.caption(f"{len(lista_ativos)} pares disponíveis")
     intervalo = st.selectbox(
         "Intervalo", ["1d", "4h", "1h", "15m"], index=0,
         help="O tempo que cada vela (candle) do gráfico representa. "

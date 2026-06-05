@@ -48,6 +48,31 @@ def obter_candles(symbol="BTCUSDT", intervalo="1d", limite=600, usar_teste=False
     return _candles_sinteticos(limite), True
 
 
+def listar_pares_usdt():
+    """Lista todos os pares ...USDT em negociacao no spot da Binance.
+
+    Usa o exchangeInfo do endpoint publico (sem bloqueio geografico). Filtra
+    tokens alavancados (UP/DOWN/BULL/BEAR), que nao sao ativos 'de verdade'.
+    Devolve lista ordenada; [] se todas as fontes falharem (o painel cai na
+    lista curta padrao nesse caso).
+    """
+    for base in BASES_SPOT:
+        try:
+            r = requests.get(f"{base}/api/v3/exchangeInfo", timeout=15)
+            r.raise_for_status()
+            simbolos = r.json().get("symbols", [])
+            pares = [s["symbol"] for s in simbolos
+                     if s.get("status") == "TRADING"
+                     and s.get("quoteAsset") == "USDT"
+                     and not any(t in s["symbol"]
+                                 for t in ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT"))]
+            if pares:
+                return sorted(pares)
+        except Exception:
+            continue
+    return []
+
+
 def obter_futuros(symbol="BTCUSDT", usar_teste=False):
     """Funding rate, long/short ratio e open interest (best-effort).
 

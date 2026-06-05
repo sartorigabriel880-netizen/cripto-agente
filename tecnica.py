@@ -18,6 +18,25 @@ PESO_BASE = {"muito baixa": 0.2, "baixa": 0.6, "media": 1.2, "alta": 2.0}
 TETO_CONFIANCA = 0.75  # direcao de 1 periodo e dominada por ruido; teto baixo de proposito
 
 
+def _arred_preco(x):
+    """Arredonda preco com casas decimais adaptadas a magnitude. Sem isso,
+    moedas muito baratas (ex.: BONK ~$0.00001) virariam 0.00 com round(x, 2)."""
+    try:
+        x = float(x)
+    except (TypeError, ValueError):
+        return None
+    if x != x:  # NaN
+        return None
+    a = abs(x)
+    if a >= 1:
+        return round(x, 2)
+    if a >= 0.01:
+        return round(x, 4)
+    if a >= 0.0001:
+        return round(x, 6)
+    return round(x, 8)
+
+
 def analise_tecnica(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
                     limite=600, usar_teste=False, incluir_futuros=True):
     df, sintetico = obter_candles(symbol, intervalo, limite, usar_teste)
@@ -88,7 +107,7 @@ def analise_tecnica(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
     # Séries recentes (até 120 pontos) para o gráfico: preço + médias móveis.
     def _serie(col, n=120):
         vals = df[col].tail(n)
-        return [None if (v != v) else round(float(v), 2) for v in vals]  # v!=v => NaN
+        return [_arred_preco(v) for v in vals]  # None quando NaN; precisao adaptativa
 
     serie_preco = _serie("close")
     serie_sma50 = _serie("sma50")
@@ -111,7 +130,7 @@ def analise_tecnica(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
         "n_amostra": base["n_amostra"],
         "hist_pct_alta": base["pct_alta"],
         "hist_confianca": base["confianca_amostra"],
-        "preco_atual": round(float(atual["close"]), 2),
+        "preco_atual": _arred_preco(atual["close"]),
         "variacao_pct": variacao_pct,
         "serie_preco": serie_preco,
         "serie_sma50": serie_sma50,
@@ -119,10 +138,10 @@ def analise_tecnica(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
         "ultimo_candle": ultimo_candle,
         "indicadores": {
             "rsi": round(float(atual["rsi"]), 1),
-            "macd_hist": round(float(atual["macd_hist"]), 2),
-            "sma50": round(float(atual["sma50"]), 2),
-            "ema9": round(float(atual["ema9"]), 2),
-            "ema21": round(float(atual["ema21"]), 2),
+            "macd_hist": _arred_preco(atual["macd_hist"]),
+            "sma50": _arred_preco(atual["sma50"]),
+            "ema9": _arred_preco(atual["ema9"]),
+            "ema21": _arred_preco(atual["ema21"]),
         },
         "futuros": futuros,
         "dados_sinteticos": sintetico,

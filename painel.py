@@ -286,30 +286,55 @@ if usar_fundamental and not tem_chave and not modo_teste:
             "(só a técnica). Desmarque '📰 Fundamental' para esconder este aviso.")
 
 
+def _fmt_preco(x):
+    """Formata preço em dólar com casas decimais adaptadas à magnitude."""
+    try:
+        x = float(x)
+    except (TypeError, ValueError):
+        return "—"
+    if x != x:  # NaN
+        return "—"
+    a = abs(x)
+    if a >= 1:
+        return f"${x:,.2f}"
+    if a >= 0.01:
+        return f"${x:,.4f}"
+    if a >= 0.0001:
+        return f"${x:,.6f}"
+    return f"${x:,.8f}"
+
+
 def _bloco_metricas(vt):
     """Cards de preço/indicadores/futuros + gráfico (preço + médias)."""
     cols = st.columns(4)
-    var = vt.get("variacao_pct", 0.0)
+    var = vt.get("variacao_pct", 0.0) or 0.0
     cor_var = VERDE if var >= 0 else VERMELHO
     seta_var = "▲" if var >= 0 else "▼"
     sub_preco = (f"<span style='color:{cor_var};font-weight:600'>"
                  f"{seta_var} {var:+.2f}%</span> no período")
-    cols[0].markdown(_card("Preço atual", f"${vt['preco_atual']:,.2f}", sub=sub_preco),
+    cols[0].markdown(_card("Preço atual", _fmt_preco(vt["preco_atual"]), sub=sub_preco),
                      unsafe_allow_html=True)
 
     rsi = vt["indicadores"]["rsi"]
-    if rsi > 70:
-        cor_rsi, zona = VERMELHO, "sobrecomprado"
-    elif rsi < 30:
-        cor_rsi, zona = VERDE, "sobrevendido"
+    if rsi is None or rsi != rsi:  # ausente / NaN
+        cols[1].markdown(_card("RSI", "—", sub="sem dados"), unsafe_allow_html=True)
     else:
-        cor_rsi, zona = NEUTRO, "neutro"
-    cols[1].markdown(_card("RSI", f"{rsi}", cor=cor_rsi, sub=zona), unsafe_allow_html=True)
+        if rsi > 70:
+            cor_rsi, zona = VERMELHO, "sobrecomprado"
+        elif rsi < 30:
+            cor_rsi, zona = VERDE, "sobrevendido"
+        else:
+            cor_rsi, zona = NEUTRO, "neutro"
+        cols[1].markdown(_card("RSI", f"{rsi}", cor=cor_rsi, sub=zona),
+                         unsafe_allow_html=True)
 
     macd_h = vt["indicadores"]["macd_hist"]
-    cols[2].markdown(_card("MACD hist", f"{macd_h}",
-                           cor=VERDE if macd_h >= 0 else VERMELHO,
-                           sub="momentum"), unsafe_allow_html=True)
+    if macd_h is None:
+        cols[2].markdown(_card("MACD hist", "—", sub="sem dados"), unsafe_allow_html=True)
+    else:
+        cols[2].markdown(_card("MACD hist", f"{macd_h}",
+                               cor=VERDE if macd_h >= 0 else VERMELHO,
+                               sub="momentum"), unsafe_allow_html=True)
 
     oi = vt["futuros"].get("open_interest")
     oi_var = vt["futuros"].get("oi_variacao")
@@ -489,7 +514,7 @@ with tab_geral:
                     v = _tecnica_leve(a, intervalo, modo_teste)
                     linhas.append({
                         "Ativo": a.replace("USDT", ""),
-                        "Preço": v["preco_atual"],
+                        "Preço": _fmt_preco(v["preco_atual"]),
                         "Variação %": v.get("variacao_pct", 0.0),
                         "RSI": v["indicadores"]["rsi"],
                         "Direção": f"{SETA.get(v['direcao'], '')} {v['direcao']}",
@@ -504,7 +529,6 @@ with tab_geral:
             st.dataframe(
                 pd.DataFrame(linhas), hide_index=True, width="stretch",
                 column_config={
-                    "Preço": st.column_config.NumberColumn(format="$%.4f"),
                     "Variação %": st.column_config.NumberColumn(format="%.2f%%"),
                     "RSI": st.column_config.NumberColumn(format="%.0f"),
                     "Tendência": st.column_config.LineChartColumn("Tendência", width="medium"),

@@ -15,7 +15,7 @@ import indicadores as ind
 from historico import (_bucket_rsi, _confianca_amostra, _estado,
                        taxa_base_condicional)
 from sintese import TETO_FINAL, sintetizar
-from tecnica import TETO_CONFIANCA, analise_tecnica
+from tecnica import TETO_CONFIANCA, _arred_preco, analise_tecnica
 
 
 # ----------------------------- fixtures --------------------------------
@@ -180,3 +180,25 @@ def test_analise_tecnica_confianca_respeita_teto():
     for h in (1, 3, 5):
         v = analise_tecnica("BTCUSDT", horizonte_periodos=h, usar_teste=True)
         assert v["confianca"] <= TETO_CONFIANCA
+
+
+# --- regressao: moedas muito baratas nao podem virar 0.0 (bug do round(x,2)) ---
+@pytest.mark.parametrize("valor,esperado", [
+    (61588.3, 61588.3),       # >= 1   -> 2 casas
+    (1.23456, 1.23),
+    (0.0723, 0.0723),         # >= 0.01 -> 4 casas
+    (0.00094812, 0.000948),   # >= 0.0001 -> 6 casas
+    (4.35e-06, 4.35e-06),     # < 0.0001 -> 8 casas (BONK)
+])
+def test_arred_preco_preserva_baratos(valor, esperado):
+    assert _arred_preco(valor) == esperado
+
+
+def test_arred_preco_nan_vira_none():
+    assert _arred_preco(float("nan")) is None
+    assert _arred_preco(None) is None
+
+
+def test_arred_preco_baratos_nao_zeram():
+    for v in (4.35e-06, 9.48e-06, 1e-7):
+        assert _arred_preco(v) > 0  # nunca colapsa para 0.0

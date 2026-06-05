@@ -39,13 +39,19 @@ from sintese import sintetizar               # noqa: E402
 
 
 def _texto_seguro(s):
-    """Neutraliza o '$' antes de exibir num markdown do Streamlit.
+    """Escapa os caracteres que o markdown do Streamlit interpretaria como
+    formatacao, para o texto livre do modelo sair LITERAL.
 
-    Dois cifrões num texto ligam o modo LaTeX e embaralham valores em dolar
-    (ex.: '$63-67K ... $4,2B' virava formula). Escapando cada '$' o texto sai
-    literal, como escrito.
+    Viloes ja vistos no texto das noticias:
+      - '$'  : dois cifroes ligam modo LaTeX e embaralham valores ('$63K ... $4B')
+      - '~'  : dois tils viram tachado/riscado ('~$80K ... ~21%' risca o meio)
+      - '*' '_' '`' : negrito/italico/codigo acidentais
+    Escapamos a contrabarra primeiro para nao escapar duas vezes.
     """
-    return (s or "").replace("$", r"\$")
+    s = s or ""
+    for ch in ["\\", "`", "*", "_", "~", "$"]:
+        s = s.replace(ch, "\\" + ch)
+    return s
 
 
 # ---------- Porta de senha (so ativa se houver senha nos secrets) ----------

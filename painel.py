@@ -111,27 +111,50 @@ with st.sidebar:
         help="Liga dados INVENTADOS (gerados pelo computador) só para testar o "
              "painel sem internet. NÃO refletem o mercado real — deixe "
              "DESMARCADO para uma análise de verdade com dados da Binance.")
+
+    st.markdown("**Quais análises rodar**")
+    usar_tecnica = st.checkbox(
+        "📈 Técnica (indicadores)", value=True,
+        help="Veredito a partir de indicadores de preço (RSI, MACD, médias, "
+             "open interest) e do histórico. Rápida e gratuita — não usa a API.")
+    usar_fundamental = st.checkbox(
+        "📰 Fundamental (notícias/macro)", value=True,
+        help="Veredito a partir de notícias, macro e sentimento, pesquisando na "
+             "web com IA. Leva alguns segundos e consome créditos da API "
+             "(Anthropic). Desmarque para uma análise só técnica, mais rápida.")
+
     analisar = st.button(
         "🔎 Analisar", type="primary", use_container_width=True,
-        help="Roda as duas análises (técnica + notícias/macro) e mostra o "
-             "veredito final. A parte de notícias pesquisa na web e pode levar "
-             "alguns segundos.")
+        help="Roda as análises marcadas acima e mostra o veredito final. "
+             "A parte de notícias pesquisa na web e pode levar alguns segundos.")
 
 tem_chave = bool(os.environ.get("ANTHROPIC_API_KEY"))
-if not tem_chave and not modo_teste:
-    st.info("Sem chave de API configurada: só a análise técnica vai rodar "
-            "(o módulo de notícias fica de fora).")
+if usar_fundamental and not tem_chave and not modo_teste:
+    st.info("Sem chave de API configurada: a análise de notícias não vai rodar "
+            "(só a técnica). Desmarque '📰 Fundamental' para esconder este aviso.")
 
 SETA = {"cima": "⬆️", "baixo": "⬇️", "ambiguo": "↔️", "indefinido": "❓"}
 
-if analisar:
-    with st.spinner("Analisando… (o módulo de notícias pesquisa na web, "
-                    "pode levar alguns segundos)"):
-        vt = analise_tecnica(ativo, intervalo, int(horizonte), 600, modo_teste)
-        vf = analise_fundamental(ativo, int(horizonte))
+
+def _indef(modulo):
+    """Veredito vazio para um módulo que o usuário optou por NÃO rodar."""
+    return {"modulo": modulo, "direcao": "indefinido", "confianca": 0.0,
+            "raciocinio": "", "n_amostra": 0}
+
+
+if analisar and not usar_tecnica and not usar_fundamental:
+    st.warning("Marque ao menos uma análise (📈 Técnica e/ou 📰 Fundamental) "
+               "na barra lateral.")
+elif analisar:
+    with st.spinner("Analisando… (se as notícias estiverem ligadas, "
+                    "a pesquisa na web pode levar alguns segundos)"):
+        vt = (analise_tecnica(ativo, intervalo, int(horizonte), 600, modo_teste)
+              if usar_tecnica else _indef("tecnica"))
+        vf = (analise_fundamental(ativo, int(horizonte))
+              if usar_fundamental else _indef("fundamental"))
         final = sintetizar(vf, vt)
 
-    if vt.get("dados_sinteticos"):
+    if usar_tecnica and vt.get("dados_sinteticos"):
         st.warning("MODO TESTE: dados sintéticos — não refletem o mercado real.")
 
     st.subheader(f"Veredito final — {ativo}")
@@ -141,35 +164,45 @@ if analisar:
     c3.metric("Concordância", final["concordancia"])
     st.caption(final["resumo"])
 
-    cols = st.columns(4)
-    cols[0].metric("Preço atual", f"{vt['preco_atual']:,}")
-    cols[1].metric("RSI", vt["indicadores"]["rsi"])
-    cols[2].metric("MACD hist", vt["indicadores"]["macd_hist"])
-    oi = vt["futuros"].get("open_interest")
-    oi_var = vt["futuros"].get("oi_variacao")
-    cols[3].metric("Open interest", f"{oi:,}" if oi is not None else "—",
-                   delta=f"{oi_var}%" if oi_var is not None else None)
+    # Linha de métricas de preço só faz sentido quando a técnica rodou.
+    if usar_tecnica:
+        cols = st.columns(4)
+        cols[0].metric("Preço atual", f"{vt['preco_atual']:,}")
+        cols[1].metric("RSI", vt["indicadores"]["rsi"])
+        cols[2].metric("MACD hist", vt["indicadores"]["macd_hist"])
+        oi = vt["futuros"].get("open_interest")
+        oi_var = vt["futuros"].get("oi_variacao")
+        cols[3].metric("Open interest", f"{oi:,}" if oi is not None else "—",
+                       delta=f"{oi_var}%" if oi_var is not None else None)
 
     st.divider()
     col_f, col_t = st.columns(2)
     with col_f:
         st.markdown("### 📰 Veredito 1 — fundamental (notícias/macro)")
-        st.write(f"**Direção:** {vf['direcao']}  |  **Confiança:** {vf['confianca']}  "
-                 f"|  **Episódios análogos (n):** {vf.get('n_amostra', '-')}")
-        if vf.get("do_cache"):
-            st.caption("↺ resultado reaproveitado do cache (não consumiu API)")
-        st.write(_texto_seguro(vf["raciocinio"]))
-        if vf.get("fontes"):
-            st.markdown("**Fontes:**")
-            for url in vf["fontes"][:8]:
-                st.markdown(f"- [{url}]({url})")
+        if not usar_fundamental:
+            st.info("Desativada nesta busca. Marque '📰 Fundamental' na barra "
+                    "lateral para incluir notícias e macro.")
+        else:
+            st.write(f"**Direção:** {vf['direcao']}  |  **Confiança:** {vf['confianca']}  "
+                     f"|  **Episódios análogos (n):** {vf.get('n_amostra', '-')}")
+            if vf.get("do_cache"):
+                st.caption("↺ resultado reaproveitado do cache (não consumiu API)")
+            st.write(_texto_seguro(vf["raciocinio"]))
+            if vf.get("fontes"):
+                st.markdown("**Fontes:**")
+                for url in vf["fontes"][:8]:
+                    st.markdown(f"- [{url}]({url})")
     with col_t:
         st.markdown("### 📈 Veredito 2 — técnica")
-        st.write(f"**Direção:** {vt['direcao']}  |  **Confiança:** {vt['confianca']}  "
-                 f"|  **Casos análogos (n):** {vt['n_amostra']}")
-        st.write(_texto_seguro(vt["raciocinio"]))
-        with st.expander("Indicadores e futuros (detalhe)"):
-            st.json({"indicadores": vt["indicadores"], "futuros": vt["futuros"]})
+        if not usar_tecnica:
+            st.info("Desativada nesta busca. Marque '📈 Técnica' na barra "
+                    "lateral para incluir indicadores.")
+        else:
+            st.write(f"**Direção:** {vt['direcao']}  |  **Confiança:** {vt['confianca']}  "
+                     f"|  **Casos análogos (n):** {vt['n_amostra']}")
+            st.write(_texto_seguro(vt["raciocinio"]))
+            with st.expander("Indicadores e futuros (detalhe)"):
+                st.json({"indicadores": vt["indicadores"], "futuros": vt["futuros"]})
 
     st.divider()
     st.caption("⚠️ " + final["aviso"] +

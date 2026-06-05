@@ -8,7 +8,16 @@ import numpy as np
 import pandas as pd
 import requests
 
-BASE_SPOT = "https://api.binance.com"
+# Fontes de candles (spot), tentadas em ordem. A 1a — data-api.binance.vision —
+# e o endpoint PUBLICO de dados de mercado da Binance, que NAO tem bloqueio
+# geografico; e o que faz funcionar quando o app roda num servidor (ex.: nuvem
+# do Streamlit, nos EUA), onde api.binance.com costuma responder 451. A 2a fica
+# como reserva. So caimos em dados sinteticos se TODAS falharem.
+BASES_SPOT = [
+    "https://data-api.binance.vision",
+    "https://api.binance.com",
+]
+BASE_SPOT = BASES_SPOT[0]  # compatibilidade
 BASE_FUT = "https://fapi.binance.com"
 TIMEOUT = 10
 
@@ -17,22 +26,26 @@ def obter_candles(symbol="BTCUSDT", intervalo="1d", limite=600, usar_teste=False
     """Retorna (DataFrame OHLCV, eh_sintetico)."""
     if usar_teste:
         return _candles_sinteticos(limite), True
-    try:
-        url = f"{BASE_SPOT}/api/v3/klines"
-        params = {"symbol": symbol, "interval": intervalo, "limit": limite}
-        resp = requests.get(url, params=params, timeout=TIMEOUT)
-        resp.raise_for_status()
-        dados = resp.json()
-        df = pd.DataFrame(dados, columns=[
-            "abertura_ts", "open", "high", "low", "close", "volume",
-            "fechamento_ts", "quote_volume", "trades", "tb_base", "tb_quote", "ignore"])
-        for col in ["open", "high", "low", "close", "volume"]:
-            df[col] = df[col].astype(float)
-        df["data"] = pd.to_datetime(df["fechamento_ts"], unit="ms")
-        return df[["data", "open", "high", "low", "close", "volume"]], False
-    except Exception as e:
-        print(f"[aviso] Falha ao buscar a Binance ({e}). Caindo para dados sinteticos.")
-        return _candles_sinteticos(limite), True
+    params = {"symbol": symbol, "interval": intervalo, "limit": limite}
+    erros = []
+    for base in BASES_SPOT:
+        try:
+            resp = requests.get(f"{base}/api/v3/klines", params=params, timeout=TIMEOUT)
+            resp.raise_for_status()
+            dados = resp.json()
+            df = pd.DataFrame(dados, columns=[
+                "abertura_ts", "open", "high", "low", "close", "volume",
+                "fechamento_ts", "quote_volume", "trades", "tb_base", "tb_quote", "ignore"])
+            for col in ["open", "high", "low", "close", "volume"]:
+                df[col] = df[col].astype(float)
+            df["data"] = pd.to_datetime(df["fechamento_ts"], unit="ms")
+            return df[["data", "open", "high", "low", "close", "volume"]], False
+        except Exception as e:
+            erros.append(f"{base} ({e})")
+            continue
+    print(f"[aviso] Falha ao buscar candles em todas as fontes: {'; '.join(erros)}. "
+          f"Caindo para dados sinteticos.")
+    return _candles_sinteticos(limite), True
 
 
 def obter_futuros(symbol="BTCUSDT", usar_teste=False):

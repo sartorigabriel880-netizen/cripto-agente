@@ -3,3 +3,4 @@ numpy
 requests
 anthropic    # modulo fundamental (Claude + web_search)
 streamlit    # painel visual (painel.py)
+tzdata       # base de fusos horarios (horario local no painel)

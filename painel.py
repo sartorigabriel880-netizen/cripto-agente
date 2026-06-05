@@ -12,7 +12,12 @@ Senha opcional (para quando publicar): defina st.secrets["senha_painel"].
 Sem senha definida, o painel abre direto (uso local).
 """
 import os
-from datetime import datetime
+from datetime import datetime, timezone
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover
+    ZoneInfo = None
 
 import pandas as pd
 import streamlit as st
@@ -83,6 +88,38 @@ from fundamental import analise_fundamental  # noqa: E402
 from sintese import sintetizar               # noqa: E402
 
 
+def _tz_local():
+    """Fuso do navegador (via st.context); cai em horário de Brasília."""
+    nome = None
+    try:
+        nome = st.context.timezone
+    except Exception:
+        nome = None
+    nome = nome or "America/Sao_Paulo"
+    if ZoneInfo:
+        try:
+            return ZoneInfo(nome), nome
+        except Exception:
+            pass
+    return timezone.utc, nome
+
+
+def _agora_local(tz):
+    """Horário atual já no fuso local, 'YYYY-MM-DD HH:MM'."""
+    return datetime.now(timezone.utc).astimezone(tz).strftime("%Y-%m-%d %H:%M")
+
+
+def _utc_para_local(s, tz):
+    """Converte uma string 'YYYY-MM-DD HH:MM' que está em UTC para o fuso local."""
+    if not s:
+        return s
+    try:
+        dt = datetime.strptime(str(s)[:16], "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+        return dt.astimezone(tz).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return s
+
+
 def _texto_seguro(s):
     """Escapa os caracteres que o markdown do Streamlit interpretaria como
     formatacao, para o texto livre do modelo sair LITERAL.
@@ -129,6 +166,8 @@ st.caption("Macro + notícias + técnica num veredito só. "
 VERDE, VERMELHO, NEUTRO = "#16C784", "#EA3943", "#616E85"
 AZUL, LARANJA, ROXO = "#3861FB", "#F7931A", "#A66BFF"
 SETA = {"cima": "⬆️", "baixo": "⬇️", "ambiguo": "↔️", "indefinido": "❓"}
+
+TZ_LOCAL, TZ_NOME = _tz_local()  # fuso do navegador (ou Brasília)
 
 # Intervalos suportados pela Binance (mesmos códigos da API de klines).
 INTERVALOS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h",
@@ -342,7 +381,7 @@ with tab_det:
 
         # grava no histórico de análises (disco)
         registro.registrar({
-            "quando": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "quando": _agora_local(TZ_LOCAL),
             "ativo": ativo,
             "intervalo": intervalo,
             "alvo": _frase_alvo(intervalo, int(horizonte)),
@@ -360,7 +399,8 @@ with tab_det:
         st.subheader(f"Veredito final — {ativo}")
         legenda = f"Prevendo **{_frase_alvo(intervalo, int(horizonte))}**."
         if usar_tecnica and vt.get("ultimo_candle"):
-            legenda += f"  ·  Vela mais recente: {vt['ultimo_candle']} (UTC)."
+            vela_local = _utc_para_local(vt["ultimo_candle"], TZ_LOCAL)
+            legenda += f"  ·  Vela mais recente: {vela_local} (horário local)."
         st.caption(legenda)
 
         cor_dir = COR_DIR.get(final["direcao"], "#0D1421")
@@ -415,7 +455,9 @@ with tab_det:
         # Exportar resumo
         resumo_txt = (
             f"Agente Cripto — {ativo} ({intervalo}, horizonte {int(horizonte)})\n"
-            f"Vela mais recente: {vt.get('ultimo_candle', '-')} UTC\n\n"
+            f"Gerado em: {_agora_local(TZ_LOCAL)} (horário local)\n"
+            f"Vela mais recente: {_utc_para_local(vt.get('ultimo_candle'), TZ_LOCAL)} "
+            f"(horário local)\n\n"
             f"VEREDITO FINAL: {final['direcao'].upper()} "
             f"(confianca {final['confianca']:.2f}, {final['concordancia']})\n"
             f"{final['resumo']}\n\n"
@@ -492,7 +534,7 @@ with tab_hist:
                 "Confiança": st.column_config.NumberColumn(format="%.2f"),
                 "Teste": st.column_config.CheckboxColumn(),
             })
-        st.caption(f"{len(hist)} análise(s) no histórico.")
+        st.caption(f"{len(hist)} análise(s) no histórico · horários em {TZ_NOME}.")
         h1, h2 = st.columns(2)
         h1.download_button(
             "⬇️ Baixar histórico (CSV)",

@@ -46,8 +46,22 @@ def analise_tecnica(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
     futuros = obter_futuros(symbol, usar_teste) if incluir_futuros else {
         "sintetico": sintetico, "funding_rate": None, "long_short_ratio": None,
         "open_interest": None, "oi_variacao": None, "oi_fonte": None}
+    return _avaliar(df, horizonte_periodos, futuros, sintetico)
+
+
+def _avaliar(df, horizonte_periodos, futuros, sintetico=False, base=None, leve=False):
+    """Decide o veredito técnico a partir de um DataFrame JÁ com indicadores.
+
+    Separado de analise_tecnica de propósito: o backtest reusa EXATAMENTE esta
+    lógica em fatias históricas (o df até o ponto i), sem espiar o futuro.
+
+    `base`: taxa-base condicional já calculada (o backtest passa pré-computada,
+    por desempenho). `leve=True`: pula a construção das séries do gráfico (o
+    backtest não precisa) — a DECISÃO em si é idêntica.
+    """
     atual = df.iloc[-1]
-    base = taxa_base_condicional(df, horizonte_periodos)
+    if base is None:
+        base = taxa_base_condicional(df, horizonte_periodos)
 
     sinais = []
 
@@ -146,9 +160,12 @@ def analise_tecnica(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
         vals = df[col].tail(n)
         return [_arred_preco(v) for v in vals]  # None quando NaN; precisao adaptativa
 
-    serie_preco = _serie("close")
-    serie_sma50 = _serie("sma50")
-    serie_ema21 = _serie("ema21")
+    if leve:
+        serie_preco = serie_sma50 = serie_ema21 = []
+    else:
+        serie_preco = _serie("close")
+        serie_sma50 = _serie("sma50")
+        serie_ema21 = _serie("ema21")
     if len(df) >= 2 and float(df["close"].iloc[-2]):
         variacao_pct = round((float(atual["close"]) / float(df["close"].iloc[-2]) - 1) * 100, 2)
     else:

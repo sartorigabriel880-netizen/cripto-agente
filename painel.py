@@ -83,6 +83,7 @@ if _segredo("MODELO_CLAUDE"):
     os.environ["MODELO_CLAUDE"] = _segredo("MODELO_CLAUDE")
 
 import registro                              # noqa: E402
+from backtest import backtestar              # noqa: E402
 from tecnica import analise_tecnica          # noqa: E402
 from fundamental import analise_fundamental  # noqa: E402
 from sintese import sintetizar               # noqa: E402
@@ -213,6 +214,12 @@ def _tecnica(ativo, intervalo, horizonte, modo_teste):
 def _tecnica_leve(ativo, intervalo, modo_teste):
     """Versão leve (sem futuros) para a tabela de visão geral."""
     return analise_tecnica(ativo, intervalo, 1, 600, modo_teste, incluir_futuros=False)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _backtest(ativo, intervalo, horizonte, passos, modo_teste):
+    """Backtest cacheado (10 min) — pesado, então não recalcula a cada clique."""
+    return backtestar(ativo, intervalo, horizonte, 600, passos, modo_teste)
 
 
 def _indef(modulo):
@@ -398,8 +405,8 @@ def _bloco_metricas(vt):
         st.line_chart(dfc, height=260, color=[AZUL, LARANJA, ROXO])
 
 
-tab_det, tab_geral, tab_hist = st.tabs(
-    ["🔎 Análise detalhada", "📊 Visão geral", "🕘 Histórico"])
+tab_det, tab_geral, tab_bt, tab_hist = st.tabs(
+    ["🔎 Análise detalhada", "📊 Visão geral", "🎯 Backtest", "🕘 Histórico"])
 
 with tab_det:
     if analisar and not usar_tecnica and not usar_fundamental:
@@ -549,6 +556,54 @@ with tab_geral:
                 })
             st.caption("⚠️ Pesquisa, não sinal de trade. Direção de 1 período é "
                        "dominada por ruído — olhe o conjunto, não um número isolado.")
+
+with tab_bt:
+    st.markdown("#### Track record da regra técnica (backtest)")
+    st.caption("Quanto a análise técnica TERIA acertado no histórico recente de "
+               f"**{ativo} ({intervalo})**, decidindo só com dados até cada ponto "
+               "(sem espiar o futuro). Mede a direção da próxima vela.")
+    passos_bt = st.slider("Pontos avaliados (quanto histórico testar)",
+                          50, 400, 200, step=50)
+    if st.button("🎯 Rodar backtest", type="primary"):
+        with st.spinner("Backtestando o histórico… (alguns segundos)"):
+            r = _backtest(ativo, intervalo, int(horizonte), int(passos_bt), modo_teste)
+        if r.get("erro"):
+            st.warning(r["erro"] + " — tente um intervalo com mais histórico (ex.: 1d).")
+        elif r["acuracia"] is None:
+            st.warning("A regra não cravou nenhuma direção no período (tudo indefinido).")
+        else:
+            acc, base_, edge = r["acuracia"], r["baseline"], r["edge"]
+            cor_edge = VERDE if (edge or 0) > 0 else VERMELHO
+            b = st.columns(3)
+            b[0].markdown(_card("Acurácia", f"{acc * 100:.1f}%", cor=cor_edge,
+                                sub=f"{r['n_chamadas']} chamadas direcionais"),
+                          unsafe_allow_html=True)
+            b[1].markdown(_card("Baseline", f"{base_ * 100:.1f}%",
+                                sub="chutar sempre o lado mais comum"),
+                          unsafe_allow_html=True)
+            b[2].markdown(_card("Edge", f"{edge * 100:+.1f} p.p.", cor=cor_edge,
+                                sub="acurácia − baseline"), unsafe_allow_html=True)
+            st.write("")
+            linhas = [{"Faixa de confiança": nome, "Chamadas": d["n"],
+                       "Acerto %": (round(d["acuracia"] * 100, 1)
+                                    if d["acuracia"] is not None else None)}
+                      for nome, d in r["por_confianca"].items()]
+            st.dataframe(pd.DataFrame(linhas), hide_index=True, width="stretch",
+                         column_config={"Acerto %": st.column_config.NumberColumn(
+                             format="%.1f%%")})
+            st.caption(f"Avaliações: {r['n_avaliacoes']} · sem direção "
+                       f"(indefinido): {r['n_indefinido']} · alta no período: "
+                       f"{r['p_alta_periodo'] * 100:.0f}%")
+            if edge is not None and edge <= 0.02:
+                st.info("ℹ️ Edge pequeno ou negativo: neste período a regra "
+                        "praticamente empatou com o palpite ingênuo. É o esperado "
+                        "— direção de curto prazo é dominada por ruído. Pesquisa, "
+                        "não sinal de trade.")
+            elif edge is not None:
+                st.success(f"A regra superou o baseline em {edge * 100:.1f} pontos "
+                           "percentuais neste período (passado ≠ futuro).")
+    st.caption("⚠️ Backtest mede só o período coberto — não é promessa de futuro. "
+               "Não inclui custos/slippage nem dados de futuros (OI/funding).")
 
 with tab_hist:
     st.markdown("#### Histórico de análises")

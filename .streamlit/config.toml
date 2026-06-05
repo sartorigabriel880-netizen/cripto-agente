@@ -1,0 +1,9 @@
+# Tema visual do painel — estilo "claro, orientado a dados" (CoinMarketCap-like).
+# Cores: azul de destaque, fundo branco, painel lateral cinza bem claro.
+[theme]
+base = "light"
+primaryColor = "#3861FB"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F8FAFD"
+textColor = "#0D1421"
+font = "sans serif"

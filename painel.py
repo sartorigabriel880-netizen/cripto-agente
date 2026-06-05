@@ -17,6 +17,48 @@ import streamlit as st
 
 st.set_page_config(page_title="Agente Cripto", page_icon="📊", layout="wide")
 
+# ---- Estilo "claro, orientado a dados" (inspirado no CoinMarketCap) ----
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+.block-container { padding-top: 2.2rem; max-width: 1200px; }
+/* Métricas viram cards com borda suave */
+[data-testid="stMetric"] {
+    background: #FFFFFF;
+    border: 1px solid #EFF2F5;
+    border-radius: 14px;
+    padding: 14px 18px;
+    box-shadow: 0 1px 2px rgba(16,24,40,0.04);
+}
+[data-testid="stMetricLabel"] p {
+    font-size: .78rem; color: #616E85; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .03em;
+}
+[data-testid="stMetricValue"] { font-weight: 700; }
+/* Títulos um pouco mais sóbrios */
+h1 { font-weight: 800; letter-spacing: -.02em; }
+h3 { font-weight: 700; }
+</style>
+""", unsafe_allow_html=True)
+
+# Paleta de direção (verde sobe / vermelho desce / cinza neutro) — estilo CMC.
+COR_DIR = {"cima": "#16C784", "baixo": "#EA3943",
+           "ambiguo": "#A6B0C3", "indefinido": "#A6B0C3"}
+
+
+def _card(titulo, valor, cor=None, sub=None):
+    """Cartão simples (título pequeno + valor grande), opcionalmente colorido."""
+    cor_css = f"color:{cor};" if cor else "color:#0D1421;"
+    sub_html = (f"<div style='font-size:.78rem;color:#616E85;margin-top:6px'>{sub}</div>"
+                if sub else "")
+    return f"""<div style="background:#FFFFFF;border:1px solid #EFF2F5;border-radius:14px;
+        padding:16px 18px;box-shadow:0 1px 2px rgba(16,24,40,.04);height:100%">
+        <div style="font-size:.78rem;color:#616E85;font-weight:600;
+            text-transform:uppercase;letter-spacing:.03em">{titulo}</div>
+        <div style="font-size:1.7rem;font-weight:700;{cor_css}margin-top:2px">{valor}</div>
+        {sub_html}</div>"""
+
 
 def _segredo(nome):
     """Le um valor dos secrets do Streamlit sem quebrar se nao existir (uso local)."""
@@ -158,11 +200,17 @@ elif analisar:
         st.warning("MODO TESTE: dados sintéticos — não refletem o mercado real.")
 
     st.subheader(f"Veredito final — {ativo}")
+    cor_dir = COR_DIR.get(final["direcao"], "#0D1421")
     c1, c2, c3 = st.columns(3)
-    c1.metric("Direção", f"{SETA.get(final['direcao'], '')} {final['direcao'].upper()}")
-    c2.metric("Confiança", f"{final['confianca']:.2f}")
-    c3.metric("Concordância", final["concordancia"])
+    c1.markdown(_card("Direção",
+                      f"{SETA.get(final['direcao'], '')} {final['direcao'].upper()}",
+                      cor=cor_dir), unsafe_allow_html=True)
+    c2.markdown(_card("Confiança", f"{final['confianca']:.2f}",
+                      sub="0 a 1 — teto baixo de propósito"), unsafe_allow_html=True)
+    c3.markdown(_card("Concordância", final["concordancia"].capitalize()),
+                unsafe_allow_html=True)
     st.caption(final["resumo"])
+    st.write("")  # respiro
 
     # Linha de métricas de preço só faz sentido quando a técnica rodou.
     if usar_tecnica:

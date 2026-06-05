@@ -1,6 +1,9 @@
 # Cache em disco do modulo fundamental (nao versionar)
 .cache/
 
+# Historico de analises (local, nao versionar)
+.hist/
+
 # Segredos do Streamlit (NUNCA subir a chave da API para o GitHub)
 .streamlit/secrets.toml
 

@@ -12,6 +12,7 @@ Senha opcional (para quando publicar): defina st.secrets["senha_painel"].
 Sem senha definida, o painel abre direto (uso local).
 """
 import os
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
@@ -76,6 +77,7 @@ if _segredo("ANTHROPIC_API_KEY"):
 if _segredo("MODELO_CLAUDE"):
     os.environ["MODELO_CLAUDE"] = _segredo("MODELO_CLAUDE")
 
+import registro                              # noqa: E402
 from tecnica import analise_tecnica          # noqa: E402
 from fundamental import analise_fundamental  # noqa: E402
 from sintese import sintetizar               # noqa: E402
@@ -318,7 +320,8 @@ def _bloco_metricas(vt):
         st.line_chart(dfc, height=260, color=[AZUL, LARANJA, ROXO])
 
 
-tab_det, tab_geral = st.tabs(["🔎 Análise detalhada", "📊 Visão geral"])
+tab_det, tab_geral, tab_hist = st.tabs(
+    ["🔎 Análise detalhada", "📊 Visão geral", "🕘 Histórico"])
 
 with tab_det:
     if analisar and not usar_tecnica and not usar_fundamental:
@@ -336,6 +339,20 @@ with tab_det:
         # registra nos recentes (mais novo primeiro, sem repetir, máx. 4)
         rec = [a for a in st.session_state["recentes"] if a != ativo]
         st.session_state["recentes"] = ([ativo] + rec)[:4]
+
+        # grava no histórico de análises (disco)
+        registro.registrar({
+            "quando": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "ativo": ativo,
+            "intervalo": intervalo,
+            "alvo": _frase_alvo(intervalo, int(horizonte)),
+            "direcao": final["direcao"],
+            "confianca": final["confianca"],
+            "concordancia": final["concordancia"],
+            "tecnica": vt.get("direcao"),
+            "fundamental": vf.get("direcao"),
+            "teste": bool(modo_teste),
+        })
 
         if usar_tecnica and vt.get("dados_sinteticos"):
             st.warning("MODO TESTE: dados sintéticos — não refletem o mercado real.")
@@ -452,6 +469,38 @@ with tab_geral:
                 })
             st.caption("⚠️ Pesquisa, não sinal de trade. Direção de 1 período é "
                        "dominada por ruído — olhe o conjunto, não um número isolado.")
+
+with tab_hist:
+    st.markdown("#### Histórico de análises")
+    st.caption("Cada análise detalhada que você roda fica registrada aqui "
+               "(mais recente no topo). Persiste ao recarregar a página.")
+    hist = registro.listar(100)
+    if not hist:
+        st.info("Ainda não há análises. Rode uma na aba **🔎 Análise detalhada**.")
+    else:
+        dfh = pd.DataFrame(hist)
+        ordem = ["quando", "ativo", "intervalo", "direcao", "confianca",
+                 "concordancia", "tecnica", "fundamental", "teste"]
+        dfh = dfh[[c for c in ordem if c in dfh.columns]].rename(columns={
+            "quando": "Quando", "ativo": "Ativo", "intervalo": "Interv.",
+            "direcao": "Direção", "confianca": "Confiança",
+            "concordancia": "Concord.", "tecnica": "Téc.",
+            "fundamental": "Fund.", "teste": "Teste"})
+        st.dataframe(
+            dfh, hide_index=True, width="stretch",
+            column_config={
+                "Confiança": st.column_config.NumberColumn(format="%.2f"),
+                "Teste": st.column_config.CheckboxColumn(),
+            })
+        st.caption(f"{len(hist)} análise(s) no histórico.")
+        h1, h2 = st.columns(2)
+        h1.download_button(
+            "⬇️ Baixar histórico (CSV)",
+            dfh.to_csv(index=False).encode("utf-8"),
+            file_name="historico_analises.csv", mime="text/csv", width="stretch")
+        if h2.button("🗑️ Limpar histórico", width="stretch"):
+            registro.limpar()
+            st.rerun()
 
 with st.expander("❓ Como ler este painel"):
     st.markdown("""

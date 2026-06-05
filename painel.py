@@ -1,0 +1,146 @@
+"""Painel visual do agente de cripto (Streamlit).
+
+Rodar no PC:
+    streamlit run painel.py
+(ou dois cliques no abrir_painel.bat, no Windows)
+
+A chave da API vem de:
+  - variavel de ambiente ANTHROPIC_API_KEY (uso no seu PC), ou
+  - st.secrets["ANTHROPIC_API_KEY"] (quando publicado na nuvem).
+
+Senha opcional (para quando publicar): defina st.secrets["senha_painel"].
+Sem senha definida, o painel abre direto (uso local).
+"""
+import os
+
+import streamlit as st
+
+st.set_page_config(page_title="Agente Cripto", page_icon="📊", layout="wide")
+
+
+def _segredo(nome):
+    """Le um valor dos secrets do Streamlit sem quebrar se nao existir (uso local)."""
+    try:
+        return st.secrets[nome]
+    except Exception:
+        return None
+
+
+# Passa a chave/modelo dos secrets (nuvem) para variaveis de ambiente, para que
+# o fundamental.py (que le os.environ) funcione sem nenhuma alteracao.
+if _segredo("ANTHROPIC_API_KEY"):
+    os.environ["ANTHROPIC_API_KEY"] = _segredo("ANTHROPIC_API_KEY")
+if _segredo("MODELO_CLAUDE"):
+    os.environ["MODELO_CLAUDE"] = _segredo("MODELO_CLAUDE")
+
+from tecnica import analise_tecnica          # noqa: E402
+from fundamental import analise_fundamental  # noqa: E402
+from sintese import sintetizar               # noqa: E402
+
+
+def _texto_seguro(s):
+    """Neutraliza o '$' antes de exibir num markdown do Streamlit.
+
+    Dois cifrões num texto ligam o modo LaTeX e embaralham valores em dolar
+    (ex.: '$63-67K ... $4,2B' virava formula). Escapando cada '$' o texto sai
+    literal, como escrito.
+    """
+    return (s or "").replace("$", r"\$")
+
+
+# ---------- Porta de senha (so ativa se houver senha nos secrets) ----------
+def liberado():
+    senha_certa = _segredo("senha_painel")
+    if not senha_certa:
+        return True  # sem senha configurada: libera (uso local)
+    if st.session_state.get("autorizado"):
+        return True
+    st.title("🔒 Painel protegido")
+    digitada = st.text_input("Senha", type="password")
+    if st.button("Entrar"):
+        if digitada == senha_certa:
+            st.session_state["autorizado"] = True
+            st.rerun()
+        else:
+            st.error("Senha incorreta.")
+    return False
+
+
+if not liberado():
+    st.stop()
+
+
+# ---------------------------- Interface ----------------------------
+st.title("📊 Agente de análise de cripto")
+st.caption("Macro + notícias + técnica num veredito só. "
+           "Ferramenta de pesquisa — não é sinal de trade.")
+
+with st.sidebar:
+    st.header("Configurar análise")
+    ativo = st.selectbox("Ativo", ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "Outro..."])
+    if ativo == "Outro...":
+        ativo = st.text_input("Digite o par (ex.: ADAUSDT)", "BTCUSDT").upper()
+    intervalo = st.selectbox("Intervalo", ["1d", "4h", "1h", "15m"], index=0)
+    horizonte = st.number_input("Horizonte (períodos à frente)", 1, 30, 1)
+    modo_teste = st.checkbox("Modo teste (dados sintéticos, offline)", value=False)
+    analisar = st.button("🔎 Analisar", type="primary", use_container_width=True)
+
+tem_chave = bool(os.environ.get("ANTHROPIC_API_KEY"))
+if not tem_chave and not modo_teste:
+    st.info("Sem chave de API configurada: só a análise técnica vai rodar "
+            "(o módulo de notícias fica de fora).")
+
+SETA = {"cima": "⬆️", "baixo": "⬇️", "ambiguo": "↔️", "indefinido": "❓"}
+
+if analisar:
+    with st.spinner("Analisando… (o módulo de notícias pesquisa na web, "
+                    "pode levar alguns segundos)"):
+        vt = analise_tecnica(ativo, intervalo, int(horizonte), 600, modo_teste)
+        vf = analise_fundamental(ativo, int(horizonte))
+        final = sintetizar(vf, vt)
+
+    if vt.get("dados_sinteticos"):
+        st.warning("MODO TESTE: dados sintéticos — não refletem o mercado real.")
+
+    st.subheader(f"Veredito final — {ativo}")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Direção", f"{SETA.get(final['direcao'], '')} {final['direcao'].upper()}")
+    c2.metric("Confiança", f"{final['confianca']:.2f}")
+    c3.metric("Concordância", final["concordancia"])
+    st.caption(final["resumo"])
+
+    cols = st.columns(4)
+    cols[0].metric("Preço atual", f"{vt['preco_atual']:,}")
+    cols[1].metric("RSI", vt["indicadores"]["rsi"])
+    cols[2].metric("MACD hist", vt["indicadores"]["macd_hist"])
+    oi = vt["futuros"].get("open_interest")
+    oi_var = vt["futuros"].get("oi_variacao")
+    cols[3].metric("Open interest", f"{oi:,}" if oi is not None else "—",
+                   delta=f"{oi_var}%" if oi_var is not None else None)
+
+    st.divider()
+    col_f, col_t = st.columns(2)
+    with col_f:
+        st.markdown("### 📰 Veredito 1 — fundamental (notícias/macro)")
+        st.write(f"**Direção:** {vf['direcao']}  |  **Confiança:** {vf['confianca']}  "
+                 f"|  **Episódios análogos (n):** {vf.get('n_amostra', '-')}")
+        if vf.get("do_cache"):
+            st.caption("↺ resultado reaproveitado do cache (não consumiu API)")
+        st.write(_texto_seguro(vf["raciocinio"]))
+        if vf.get("fontes"):
+            st.markdown("**Fontes:**")
+            for url in vf["fontes"][:8]:
+                st.markdown(f"- [{url}]({url})")
+    with col_t:
+        st.markdown("### 📈 Veredito 2 — técnica")
+        st.write(f"**Direção:** {vt['direcao']}  |  **Confiança:** {vt['confianca']}  "
+                 f"|  **Casos análogos (n):** {vt['n_amostra']}")
+        st.write(_texto_seguro(vt["raciocinio"]))
+        with st.expander("Indicadores e futuros (detalhe)"):
+            st.json({"indicadores": vt["indicadores"], "futuros": vt["futuros"]})
+
+    st.divider()
+    st.caption("⚠️ " + final["aviso"] +
+               " Olhe sempre o raciocínio e o n_amostra, não só o número da confiança.")
+else:
+    st.info("Escolha o ativo na barra lateral e clique em **Analisar**.")

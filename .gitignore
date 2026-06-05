@@ -1,0 +1,15 @@
+# Cache em disco do modulo fundamental (nao versionar)
+.cache/
+
+# Segredos do Streamlit (NUNCA subir a chave da API para o GitHub)
+.streamlit/secrets.toml
+
+# Artefatos do Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Ambientes virtuais
+.venv/
+venv/
+env/

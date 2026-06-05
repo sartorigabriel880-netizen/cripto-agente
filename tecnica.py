@@ -81,6 +81,13 @@ def analise_tecnica(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
 
     raciocinio = " | ".join(f"{s['nome']}: {s['detalhe']}" for s in sinais)
 
+    # Série recente de preço (para o mini-gráfico) e variação do último período.
+    serie_preco = [round(float(x), 2) for x in df["close"].tail(40)]
+    if len(df) >= 2 and float(df["close"].iloc[-2]):
+        variacao_pct = round((float(atual["close"]) / float(df["close"].iloc[-2]) - 1) * 100, 2)
+    else:
+        variacao_pct = 0.0
+
     return {
         "modulo": "tecnica",
         "direcao": direcao,
@@ -88,6 +95,8 @@ def analise_tecnica(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
         "raciocinio": raciocinio,
         "n_amostra": base["n_amostra"],
         "preco_atual": round(float(atual["close"]), 2),
+        "variacao_pct": variacao_pct,
+        "serie_preco": serie_preco,
         "indicadores": {
             "rsi": round(float(atual["rsi"]), 1),
             "macd_hist": round(float(atual["macd_hist"]), 2),

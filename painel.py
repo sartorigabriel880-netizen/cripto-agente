@@ -13,6 +13,7 @@ Sem senha definida, o painel abre direto (uso local).
 """
 import os
 
+import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="Agente Cripto", page_icon="📊", layout="wide")
@@ -214,14 +215,49 @@ elif analisar:
 
     # Linha de métricas de preço só faz sentido quando a técnica rodou.
     if usar_tecnica:
+        VERDE, VERMELHO, NEUTRO = "#16C784", "#EA3943", "#616E85"
         cols = st.columns(4)
-        cols[0].metric("Preço atual", f"{vt['preco_atual']:,}")
-        cols[1].metric("RSI", vt["indicadores"]["rsi"])
-        cols[2].metric("MACD hist", vt["indicadores"]["macd_hist"])
+
+        # Preço + variação % do último período (verde/vermelho com seta)
+        var = vt.get("variacao_pct", 0.0)
+        cor_var = VERDE if var >= 0 else VERMELHO
+        seta_var = "▲" if var >= 0 else "▼"
+        sub_preco = (f"<span style='color:{cor_var};font-weight:600'>"
+                     f"{seta_var} {var:+.2f}%</span> no período")
+        cols[0].markdown(_card("Preço atual", f"${vt['preco_atual']:,.2f}", sub=sub_preco),
+                         unsafe_allow_html=True)
+
+        # RSI colorido: vermelho sobrecomprado (>70), verde sobrevendido (<30)
+        rsi = vt["indicadores"]["rsi"]
+        if rsi > 70:
+            cor_rsi, zona = VERMELHO, "sobrecomprado"
+        elif rsi < 30:
+            cor_rsi, zona = VERDE, "sobrevendido"
+        else:
+            cor_rsi, zona = NEUTRO, "neutro"
+        cols[1].markdown(_card("RSI", f"{rsi}", cor=cor_rsi, sub=zona), unsafe_allow_html=True)
+
+        # MACD histograma: verde positivo / vermelho negativo
+        macd_h = vt["indicadores"]["macd_hist"]
+        cols[2].markdown(_card("MACD hist", f"{macd_h}",
+                               cor=VERDE if macd_h >= 0 else VERMELHO,
+                               sub="momentum"), unsafe_allow_html=True)
+
+        # Open interest (some na nuvem; mostra "—")
         oi = vt["futuros"].get("open_interest")
         oi_var = vt["futuros"].get("oi_variacao")
-        cols[3].metric("Open interest", f"{oi:,}" if oi is not None else "—",
-                       delta=f"{oi_var}%" if oi_var is not None else None)
+        sub_oi = (f"<span style='color:{VERDE if (oi_var or 0) >= 0 else VERMELHO}'>"
+                  f"{oi_var:+.1f}%</span>" if oi_var is not None else "indisponível")
+        cols[3].markdown(_card("Open interest", f"{oi:,.0f}" if oi is not None else "—",
+                               sub=sub_oi), unsafe_allow_html=True)
+
+        # Mini-gráfico (sparkline) do preço recente
+        serie = vt.get("serie_preco")
+        if serie:
+            st.write("")
+            st.caption("Preço — últimos períodos")
+            cor_linha = VERDE if serie[-1] >= serie[0] else VERMELHO
+            st.line_chart(pd.DataFrame({"preço": serie}), height=150, color=cor_linha)
 
     st.divider()
     col_f, col_t = st.columns(2)

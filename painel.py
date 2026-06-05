@@ -77,13 +77,39 @@ st.caption("Macro + notícias + técnica num veredito só. "
 
 with st.sidebar:
     st.header("Configurar análise")
-    ativo = st.selectbox("Ativo", ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "Outro..."])
+    ativo = st.selectbox(
+        "Ativo", ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "Outro..."],
+        help="Qual criptomoeda analisar. O par termina em USDT porque o preço é "
+             "cotado em dólar — ex.: BTCUSDT = Bitcoin, ETHUSDT = Ethereum, "
+             "SOLUSDT = Solana, XRPUSDT = XRP. Escolha 'Outro...' para digitar "
+             "qualquer outro par disponível na Binance (ex.: ADAUSDT).")
     if ativo == "Outro...":
-        ativo = st.text_input("Digite o par (ex.: ADAUSDT)", "BTCUSDT").upper()
-    intervalo = st.selectbox("Intervalo", ["1d", "4h", "1h", "15m"], index=0)
-    horizonte = st.number_input("Horizonte (períodos à frente)", 1, 30, 1)
-    modo_teste = st.checkbox("Modo teste (dados sintéticos, offline)", value=False)
-    analisar = st.button("🔎 Analisar", type="primary", use_container_width=True)
+        ativo = st.text_input(
+            "Digite o par (ex.: ADAUSDT)", "BTCUSDT",
+            help="Use o formato MOEDA+USDT, tudo junto e em maiúsculas, "
+                 "exatamente como na Binance. Ex.: ADAUSDT, DOGEUSDT, BNBUSDT.").upper()
+    intervalo = st.selectbox(
+        "Intervalo", ["1d", "4h", "1h", "15m"], index=0,
+        help="O tempo que cada vela (candle) do gráfico representa. "
+             "1d = 1 dia por vela, 4h = 4 horas, 1h = 1 hora, 15m = 15 minutos. "
+             "Intervalos menores reagem mais rápido às mudanças, mas têm mais "
+             "ruído; maiores mostram a tendência de fundo.")
+    horizonte = st.number_input(
+        "Horizonte (períodos à frente)", 1, 30, 1,
+        help="Quantos períodos à frente a análise tenta enxergar — e cada "
+             "período tem o tamanho do Intervalo acima. Ex.: horizonte 1 com "
+             "intervalo 1d = previsão para o próximo dia; horizonte 3 com 4h = "
+             "as próximas 12 horas. Quanto maior o horizonte, mais incerto.")
+    modo_teste = st.checkbox(
+        "Modo teste (dados sintéticos, offline)", value=False,
+        help="Liga dados INVENTADOS (gerados pelo computador) só para testar o "
+             "painel sem internet. NÃO refletem o mercado real — deixe "
+             "DESMARCADO para uma análise de verdade com dados da Binance.")
+    analisar = st.button(
+        "🔎 Analisar", type="primary", use_container_width=True,
+        help="Roda as duas análises (técnica + notícias/macro) e mostra o "
+             "veredito final. A parte de notícias pesquisa na web e pode levar "
+             "alguns segundos.")
 
 tem_chave = bool(os.environ.get("ANTHROPIC_API_KEY"))
 if not tem_chave and not modo_teste:

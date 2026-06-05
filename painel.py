@@ -243,11 +243,17 @@ elif analisar:
                                cor=VERDE if macd_h >= 0 else VERMELHO,
                                sub="momentum"), unsafe_allow_html=True)
 
-        # Open interest (some na nuvem; mostra "—")
+        # Open interest (Binance local; OKX como reserva na nuvem)
         oi = vt["futuros"].get("open_interest")
         oi_var = vt["futuros"].get("oi_variacao")
-        sub_oi = (f"<span style='color:{VERDE if (oi_var or 0) >= 0 else VERMELHO}'>"
-                  f"{oi_var:+.1f}%</span>" if oi_var is not None else "indisponível")
+        oi_fonte = vt["futuros"].get("oi_fonte")
+        if oi_var is not None:
+            sub_oi = (f"<span style='color:{VERDE if oi_var >= 0 else VERMELHO}'>"
+                      f"{oi_var:+.1f}%</span> · {oi_fonte or ''}")
+        elif oi is not None:
+            sub_oi = f"via {oi_fonte}" if oi_fonte else "snapshot"
+        else:
+            sub_oi = "indisponível"
         cols[3].markdown(_card("Open interest", f"{oi:,.0f}" if oi is not None else "—",
                                sub=sub_oi), unsafe_allow_html=True)
 

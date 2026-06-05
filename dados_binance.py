@@ -58,7 +58,8 @@ def obter_futuros(symbol="BTCUSDT", usar_teste=False):
         return {"funding_rate": 0.0001, "long_short_ratio": 1.0,
                 "open_interest": 250000.0, "oi_variacao": 1.5, "sintetico": True}
 
-    resultado = {"sintetico": False, "open_interest": None, "oi_variacao": None}
+    resultado = {"sintetico": False, "open_interest": None, "oi_variacao": None,
+                 "oi_fonte": None}
 
     # Funding rate
     try:
@@ -80,24 +81,57 @@ def obter_futuros(symbol="BTCUSDT", usar_teste=False):
     except Exception:
         resultado["long_short_ratio"] = None
 
-    # Open interest (ultimo valor + variacao vs o periodo anterior)
-    try:
-        r = requests.get(f"{BASE_FUT}/futures/data/openInterestHist",
-                         params={"symbol": symbol, "period": "1d", "limit": 2},
-                         timeout=TIMEOUT)
-        r.raise_for_status()
-        dados = r.json()
-        if dados:
-            oi_atual = float(dados[-1]["sumOpenInterest"])
-            resultado["open_interest"] = round(oi_atual, 2)
-            if len(dados) >= 2:
-                oi_ant = float(dados[-2]["sumOpenInterest"])
-                if oi_ant:
-                    resultado["oi_variacao"] = round((oi_atual / oi_ant - 1) * 100, 2)
-    except Exception:
-        pass
+    # Open interest: tenta Binance (ideal, com variacao) e, se falhar — tipico
+    # quando o app roda num servidor nos EUA, onde a Binance de futuros bloqueia —
+    # cai para a OKX, que costuma responder. So fica None se TODAS falharem.
+    for fonte in (_oi_binance, _oi_okx):
+        try:
+            oi = fonte(symbol)
+        except Exception:
+            oi = None
+        if oi and oi.get("open_interest") is not None:
+            resultado.update(oi)
+            break
 
     return resultado
+
+
+def _oi_binance(symbol):
+    """Open interest da Binance (valor + variacao vs o periodo anterior)."""
+    r = requests.get(f"{BASE_FUT}/futures/data/openInterestHist",
+                     params={"symbol": symbol, "period": "1d", "limit": 2},
+                     timeout=TIMEOUT)
+    r.raise_for_status()
+    dados = r.json()
+    if not dados:
+        return None
+    oi_atual = float(dados[-1]["sumOpenInterest"])
+    variacao = None
+    if len(dados) >= 2:
+        oi_ant = float(dados[-2]["sumOpenInterest"])
+        if oi_ant:
+            variacao = round((oi_atual / oi_ant - 1) * 100, 2)
+    return {"open_interest": round(oi_atual, 2), "oi_variacao": variacao,
+            "oi_fonte": "Binance"}
+
+
+def _oi_okx(symbol):
+    """Open interest da OKX (reserva sem bloqueio geografico). So o valor — a OKX
+    nao da a variacao nesse endpoint, entao oi_variacao fica None."""
+    base = symbol[:-4] if symbol.upper().endswith("USDT") else symbol
+    inst = f"{base.upper()}-USDT-SWAP"
+    for host in ("https://www.okx.com", "https://aws.okx.com"):
+        try:
+            r = requests.get(f"{host}/api/v5/public/open-interest",
+                             params={"instId": inst}, timeout=TIMEOUT)
+            r.raise_for_status()
+            data = r.json().get("data") or []
+            if data and data[0].get("oiCcy"):
+                return {"open_interest": round(float(data[0]["oiCcy"]), 2),
+                        "oi_variacao": None, "oi_fonte": "OKX"}
+        except Exception:
+            continue
+    return None
 
 
 def _candles_sinteticos(n=600, seed=7):

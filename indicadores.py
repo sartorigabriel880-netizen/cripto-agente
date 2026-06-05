@@ -52,6 +52,25 @@ def atr(df, periodo=14):
     return tr.ewm(alpha=1 / periodo, adjust=False).mean()
 
 
+def adx(df, periodo=14):
+    """Average Directional Index (Wilder) — FORÇA da tendência (0-100), sem dizer
+    a direção. > ~25 = tendência forte; < ~20 = mercado lateral (sinais de
+    tendência pouco confiáveis). É a base do filtro de peso da análise técnica."""
+    high, low, close = df["high"], df["low"], df["close"]
+    up = high.diff()
+    down = -low.diff()
+    mais_dm = ((up > down) & (up > 0)).astype(float) * up
+    menos_dm = ((down > up) & (down > 0)).astype(float) * down
+    tr = pd.concat([(high - low), (high - close.shift()).abs(),
+                    (low - close.shift()).abs()], axis=1).max(axis=1)
+    atr_ = tr.ewm(alpha=1 / periodo, adjust=False).mean()
+    mais_di = 100 * (mais_dm.ewm(alpha=1 / periodo, adjust=False).mean() / atr_)
+    menos_di = 100 * (menos_dm.ewm(alpha=1 / periodo, adjust=False).mean() / atr_)
+    soma = (mais_di + menos_di).replace(0, float("nan"))
+    dx = ((mais_di - menos_di).abs() / soma) * 100
+    return dx.ewm(alpha=1 / periodo, adjust=False).mean()
+
+
 def adicionar_indicadores(df):
     """Acrescenta as colunas de indicadores ao DataFrame de candles."""
     df = df.copy()
@@ -63,4 +82,5 @@ def adicionar_indicadores(df):
     df["ema21"] = ema(df["close"], 21)
     df["bb_sup"], df["bb_mid"], df["bb_inf"] = bollinger(df["close"])
     df["atr"] = atr(df)
+    df["adx"] = adx(df)
     return df

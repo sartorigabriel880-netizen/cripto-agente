@@ -55,11 +55,24 @@ def analise_tecnica(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
         # voto em [-1, 1]: +1 = alta, -1 = baixa, 0 = neutro
         sinais.append({"nome": nome, "voto": voto, "peso": peso, "detalhe": detalhe})
 
-    add("MACD", 1 if atual["macd_hist"] > 0 else -1, 1.0,
+    # --- Filtro de tendencia por ADX (evidencia: sinais de tendencia so sao
+    # confiaveis quando ha tendencia de verdade). Em mercado lateral (ADX baixo)
+    # reduzimos o peso dos sinais de tendencia; em tendencia forte, reforcamos. ---
+    adx_val = float(atual["adx"]) if atual["adx"] == atual["adx"] else None
+    if adx_val is None:
+        ft, regime = 1.0, "indefinida"
+    elif adx_val >= 25:
+        ft, regime = 1.15, "forte"
+    elif adx_val >= 20:
+        ft, regime = 1.0, "moderada"
+    else:
+        ft, regime = 0.6, "lateral"
+
+    add("MACD", 1 if atual["macd_hist"] > 0 else -1, 1.0 * ft,
         f"histograma {'positivo' if atual['macd_hist'] > 0 else 'negativo'}")
-    add("Preco vs SMA50", 1 if atual["close"] > atual["sma50"] else -1, 1.0,
+    add("Preco vs SMA50", 1 if atual["close"] > atual["sma50"] else -1, 1.0 * ft,
         f"preco {'acima' if atual['close'] > atual['sma50'] else 'abaixo'} da media de 50")
-    add("EMA9 vs EMA21", 1 if atual["ema9"] > atual["ema21"] else -1, 0.8,
+    add("EMA9 vs EMA21", 1 if atual["ema9"] > atual["ema21"] else -1, 0.8 * ft,
         f"tendencia de curto prazo de {'alta' if atual['ema9'] > atual['ema21'] else 'baixa'}")
 
     if atual["rsi"] > 70:
@@ -73,6 +86,27 @@ def analise_tecnica(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
     add("Historico condicional", lean, PESO_BASE[base["confianca_amostra"]],
         f"{base['pct_alta'] * 100:.0f}% de alta em casos parecidos "
         f"(n={base['n_amostra']}, confianca {base['confianca_amostra']})")
+
+    # Momentum de serie temporal (TSMOM) — evidencia academica forte em cripto:
+    # o retorno recente do look-back tende a persistir. Pesado pelo regime (ADX).
+    lb = min(30, len(df) - 1)
+    if lb >= 5:
+        ret_lb = float(df["close"].iloc[-1]) / float(df["close"].iloc[-1 - lb]) - 1
+        if abs(ret_lb) > 0.005:
+            add("Momentum (TSMOM)", 1 if ret_lb > 0 else -1, 1.0 * ft,
+                f"retorno de {lb} periodos {ret_lb * 100:+.1f}% (tende a persistir)")
+
+    # Confirmacao por volume — movimento com volume acima da media e mais
+    # confiavel (evita 'fake breakout'); volume fraco esvazia a conviccao.
+    vol_med = float(df["volume"].tail(20).mean())
+    vol_atual = float(atual["volume"])
+    if vol_med > 0:
+        razao = vol_atual / vol_med
+        tend = 1 if atual["ema9"] > atual["ema21"] else -1
+        if razao > 1.2:
+            add("Volume", tend, 0.5, f"volume {razao:.1f}x a media (confirma o movimento)")
+        else:
+            add("Volume", 0, 0.2, f"volume {razao:.1f}x a media (sem confirmacao)")
 
     # Open interest: OI subindo reforca a tendencia de curto prazo; caindo, esvazia.
     oi_var = futuros.get("oi_variacao")
@@ -102,7 +136,10 @@ def analise_tecnica(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
     confianca = base_conf * (0.4 + 0.6 * fator_amostra)
     confianca = round(min(confianca, TETO_CONFIANCA), 2)
 
-    raciocinio = " | ".join(f"{s['nome']}: {s['detalhe']}" for s in sinais)
+    nota_adx = (f"ADX {adx_val:.0f} (tendencia {regime})" if adx_val is not None
+                else "ADX indisponivel")
+    raciocinio = nota_adx + " | " + " | ".join(
+        f"{s['nome']}: {s['detalhe']}" for s in sinais)
 
     # Séries recentes (até 120 pontos) para o gráfico: preço + médias móveis.
     def _serie(col, n=120):
@@ -142,6 +179,7 @@ def analise_tecnica(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
             "sma50": _arred_preco(atual["sma50"]),
             "ema9": _arred_preco(atual["ema9"]),
             "ema21": _arred_preco(atual["ema21"]),
+            "adx": round(adx_val, 1) if adx_val is not None else None,
         },
         "futuros": futuros,
         "dados_sinteticos": sintetico,

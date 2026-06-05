@@ -349,25 +349,39 @@ def _bloco_metricas(vt):
     cols[3].markdown(_card("Open interest", f"{oi:,.0f}" if oi is not None else "—",
                            sub=sub_oi), unsafe_allow_html=True)
 
-    # Funding rate + Long/Short (com reserva OKX para funcionar na nuvem)
+    # Tendência (ADX) + Funding rate + Long/Short
     st.write("")
-    f2 = st.columns(2)
+    f2 = st.columns(3)
+    adxv = vt["indicadores"].get("adx")
+    if adxv is None:
+        f2[0].markdown(_card("Tendência (ADX)", "—", sub="sem dados"),
+                       unsafe_allow_html=True)
+    else:
+        if adxv >= 25:
+            reg, cor_adx = "forte", AZUL
+        elif adxv >= 20:
+            reg, cor_adx = "moderada", NEUTRO
+        else:
+            reg, cor_adx = "lateral (sinais fracos)", NEUTRO
+        f2[0].markdown(_card("Tendência (ADX)", f"{adxv}", cor=cor_adx, sub=reg),
+                       unsafe_allow_html=True)
+
     fr = vt["futuros"].get("funding_rate")
     if fr is not None:
         nota = "longs pagam shorts" if fr >= 0 else "shorts pagam longs"
-        f2[0].markdown(_card("Funding rate", f"{fr * 100:+.4f}%",
+        f2[1].markdown(_card("Funding rate", f"{fr * 100:+.4f}%",
                              cor=VERDE if fr >= 0 else VERMELHO, sub=nota),
                        unsafe_allow_html=True)
     else:
-        f2[0].markdown(_card("Funding rate", "—", sub="indisponível"),
+        f2[1].markdown(_card("Funding rate", "—", sub="indisponível"),
                        unsafe_allow_html=True)
     ls = vt["futuros"].get("long_short_ratio")
     if ls is not None:
-        f2[1].markdown(_card("Long / Short", f"{ls:.2f}",
+        f2[2].markdown(_card("Long / Short", f"{ls:.2f}",
                              cor=VERDE if ls >= 1 else VERMELHO,
                              sub="> 1 = mais comprados"), unsafe_allow_html=True)
     else:
-        f2[1].markdown(_card("Long / Short", "—", sub="indisponível"),
+        f2[2].markdown(_card("Long / Short", "—", sub="indisponível"),
                        unsafe_allow_html=True)
 
     # Gráfico: preço + médias móveis (SMA50 / EMA21)

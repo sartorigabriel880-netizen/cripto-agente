@@ -73,8 +73,13 @@ def test_atr_nao_negativo(df):
 
 def test_adicionar_indicadores_cria_colunas(df_ind):
     esperadas = {"rsi", "macd", "macd_sinal", "macd_hist", "sma20", "sma50",
-                 "ema9", "ema21", "bb_sup", "bb_mid", "bb_inf", "atr"}
+                 "ema9", "ema21", "bb_sup", "bb_mid", "bb_inf", "atr", "adx"}
     assert esperadas.issubset(df_ind.columns)
+
+
+def test_adx_fica_no_intervalo_0_100(df):
+    a = ind.adx(df).dropna()
+    assert (a >= 0).all() and (a <= 100).all()
 
 
 # ------------------------------ historico ------------------------------
@@ -172,7 +177,7 @@ def test_analise_tecnica_modo_teste_estrutura():
     assert 0.0 <= v["confianca"] <= TETO_CONFIANCA
     assert v["dados_sinteticos"] is True
     assert v["futuros"]["sintetico"] is True
-    assert {"rsi", "macd_hist", "sma50", "ema9", "ema21"} <= set(v["indicadores"])
+    assert {"rsi", "macd_hist", "sma50", "ema9", "ema21", "adx"} <= set(v["indicadores"])
 
 
 def test_analise_tecnica_confianca_respeita_teto():

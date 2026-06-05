@@ -19,10 +19,14 @@ TETO_CONFIANCA = 0.75  # direcao de 1 periodo e dominada por ruido; teto baixo d
 
 
 def analise_tecnica(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
-                    limite=600, usar_teste=False):
+                    limite=600, usar_teste=False, incluir_futuros=True):
     df, sintetico = obter_candles(symbol, intervalo, limite, usar_teste)
     df = adicionar_indicadores(df)
-    futuros = obter_futuros(symbol, usar_teste)
+    # incluir_futuros=False acelera a 'visao geral' (varios ativos de uma vez),
+    # pulando as chamadas de funding/long-short/open interest.
+    futuros = obter_futuros(symbol, usar_teste) if incluir_futuros else {
+        "sintetico": sintetico, "funding_rate": None, "long_short_ratio": None,
+        "open_interest": None, "oi_variacao": None, "oi_fonte": None}
     atual = df.iloc[-1]
     base = taxa_base_condicional(df, horizonte_periodos)
 
@@ -81,12 +85,23 @@ def analise_tecnica(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
 
     raciocinio = " | ".join(f"{s['nome']}: {s['detalhe']}" for s in sinais)
 
-    # Série recente de preço (para o mini-gráfico) e variação do último período.
-    serie_preco = [round(float(x), 2) for x in df["close"].tail(40)]
+    # Séries recentes (até 120 pontos) para o gráfico: preço + médias móveis.
+    def _serie(col, n=120):
+        vals = df[col].tail(n)
+        return [None if (v != v) else round(float(v), 2) for v in vals]  # v!=v => NaN
+
+    serie_preco = _serie("close")
+    serie_sma50 = _serie("sma50")
+    serie_ema21 = _serie("ema21")
     if len(df) >= 2 and float(df["close"].iloc[-2]):
         variacao_pct = round((float(atual["close"]) / float(df["close"].iloc[-2]) - 1) * 100, 2)
     else:
         variacao_pct = 0.0
+
+    try:
+        ultimo_candle = str(atual["data"])[:16]  # 'YYYY-MM-DD HH:MM'
+    except Exception:
+        ultimo_candle = None
 
     return {
         "modulo": "tecnica",
@@ -94,9 +109,14 @@ def analise_tecnica(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
         "confianca": confianca,
         "raciocinio": raciocinio,
         "n_amostra": base["n_amostra"],
+        "hist_pct_alta": base["pct_alta"],
+        "hist_confianca": base["confianca_amostra"],
         "preco_atual": round(float(atual["close"]), 2),
         "variacao_pct": variacao_pct,
         "serie_preco": serie_preco,
+        "serie_sma50": serie_sma50,
+        "serie_ema21": serie_ema21,
+        "ultimo_candle": ultimo_candle,
         "indicadores": {
             "rsi": round(float(atual["rsi"]), 1),
             "macd_hist": round(float(atual["macd_hist"]), 2),

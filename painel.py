@@ -124,6 +124,10 @@ st.title("📊 Agente de análise de cripto")
 st.caption("Macro + notícias + técnica num veredito só. "
            "Ferramenta de pesquisa — não é sinal de trade.")
 
+VERDE, VERMELHO, NEUTRO = "#16C784", "#EA3943", "#616E85"
+AZUL, LARANJA, ROXO = "#3861FB", "#F7931A", "#A66BFF"
+SETA = {"cima": "⬆️", "baixo": "⬇️", "ambiguo": "↔️", "indefinido": "❓"}
+
 POPULARES = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT", "ADAUSDT",
              "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "DOTUSDT"]
 
@@ -140,11 +144,41 @@ def _ativos_disponiveis():
     return topo + resto
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _tecnica(ativo, intervalo, horizonte, modo_teste):
+    """Análise técnica cacheada por 60s (clicar de novo no mesmo ativo é instantâneo)."""
+    return analise_tecnica(ativo, intervalo, horizonte, 600, modo_teste)
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _tecnica_leve(ativo, intervalo, modo_teste):
+    """Versão leve (sem futuros) para a tabela de visão geral."""
+    return analise_tecnica(ativo, intervalo, 1, 600, modo_teste, incluir_futuros=False)
+
+
+def _indef(modulo):
+    """Veredito vazio para um módulo que o usuário optou por NÃO rodar."""
+    return {"modulo": modulo, "direcao": "indefinido", "confianca": 0.0,
+            "raciocinio": "", "n_amostra": 0}
+
+
+st.session_state.setdefault("recentes", [])
+
 with st.sidebar:
     st.header("Configurar análise")
     lista_ativos = _ativos_disponiveis()
+
+    if st.session_state["recentes"]:
+        st.caption("Recentes")
+        rcols = st.columns(len(st.session_state["recentes"]))
+        for i, a in enumerate(st.session_state["recentes"]):
+            if rcols[i].button(a.replace("USDT", ""), key=f"rec_{a}",
+                               width="stretch"):
+                st.session_state["ativo_widget"] = a
+                st.rerun()
+
     ativo = st.selectbox(
-        "Ativo", lista_ativos,
+        "Ativo", lista_ativos, key="ativo_widget",
         help="Qual criptomoeda analisar — a lista traz TODOS os pares USDT da "
              "Binance (os mais conhecidos no topo). Digite para buscar, ex.: "
              "'ADA', 'DOGE', 'PEPE'. O par termina em USDT porque o preço é "
@@ -162,6 +196,9 @@ with st.sidebar:
              "período tem o tamanho do Intervalo acima. Ex.: horizonte 1 com "
              "intervalo 1d = previsão para o próximo dia; horizonte 3 com 4h = "
              "as próximas 12 horas. Quanto maior o horizonte, mais incerto.")
+    pontos = st.select_slider(
+        "Pontos no gráfico", options=[30, 60, 120], value=60,
+        help="Quantos períodos recentes mostrar no gráfico de preço.")
     modo_teste = st.checkbox(
         "Modo teste (dados sintéticos, offline)", value=False,
         help="Liga dados INVENTADOS (gerados pelo computador) só para testar o "
@@ -180,7 +217,7 @@ with st.sidebar:
              "(Anthropic). Desmarque para uma análise só técnica, mais rápida.")
 
     analisar = st.button(
-        "🔎 Analisar", type="primary", use_container_width=True,
+        "🔎 Analisar", type="primary", width="stretch",
         help="Roda as análises marcadas acima e mostra o veredito final. "
              "A parte de notícias pesquisa na web e pode levar alguns segundos.")
 
@@ -189,126 +226,225 @@ if usar_fundamental and not tem_chave and not modo_teste:
     st.info("Sem chave de API configurada: a análise de notícias não vai rodar "
             "(só a técnica). Desmarque '📰 Fundamental' para esconder este aviso.")
 
-SETA = {"cima": "⬆️", "baixo": "⬇️", "ambiguo": "↔️", "indefinido": "❓"}
+
+def _bloco_metricas(vt):
+    """Cards de preço/indicadores/futuros + gráfico (preço + médias)."""
+    cols = st.columns(4)
+    var = vt.get("variacao_pct", 0.0)
+    cor_var = VERDE if var >= 0 else VERMELHO
+    seta_var = "▲" if var >= 0 else "▼"
+    sub_preco = (f"<span style='color:{cor_var};font-weight:600'>"
+                 f"{seta_var} {var:+.2f}%</span> no período")
+    cols[0].markdown(_card("Preço atual", f"${vt['preco_atual']:,.2f}", sub=sub_preco),
+                     unsafe_allow_html=True)
+
+    rsi = vt["indicadores"]["rsi"]
+    if rsi > 70:
+        cor_rsi, zona = VERMELHO, "sobrecomprado"
+    elif rsi < 30:
+        cor_rsi, zona = VERDE, "sobrevendido"
+    else:
+        cor_rsi, zona = NEUTRO, "neutro"
+    cols[1].markdown(_card("RSI", f"{rsi}", cor=cor_rsi, sub=zona), unsafe_allow_html=True)
+
+    macd_h = vt["indicadores"]["macd_hist"]
+    cols[2].markdown(_card("MACD hist", f"{macd_h}",
+                           cor=VERDE if macd_h >= 0 else VERMELHO,
+                           sub="momentum"), unsafe_allow_html=True)
+
+    oi = vt["futuros"].get("open_interest")
+    oi_var = vt["futuros"].get("oi_variacao")
+    oi_fonte = vt["futuros"].get("oi_fonte")
+    if oi_var is not None:
+        sub_oi = (f"<span style='color:{VERDE if oi_var >= 0 else VERMELHO}'>"
+                  f"{oi_var:+.1f}%</span> · {oi_fonte or ''}")
+    elif oi is not None:
+        sub_oi = f"via {oi_fonte}" if oi_fonte else "snapshot"
+    else:
+        sub_oi = "indisponível"
+    cols[3].markdown(_card("Open interest", f"{oi:,.0f}" if oi is not None else "—",
+                           sub=sub_oi), unsafe_allow_html=True)
+
+    # Funding rate + Long/Short (com reserva OKX para funcionar na nuvem)
+    st.write("")
+    f2 = st.columns(2)
+    fr = vt["futuros"].get("funding_rate")
+    if fr is not None:
+        nota = "longs pagam shorts" if fr >= 0 else "shorts pagam longs"
+        f2[0].markdown(_card("Funding rate", f"{fr * 100:+.4f}%",
+                             cor=VERDE if fr >= 0 else VERMELHO, sub=nota),
+                       unsafe_allow_html=True)
+    else:
+        f2[0].markdown(_card("Funding rate", "—", sub="indisponível"),
+                       unsafe_allow_html=True)
+    ls = vt["futuros"].get("long_short_ratio")
+    if ls is not None:
+        f2[1].markdown(_card("Long / Short", f"{ls:.2f}",
+                             cor=VERDE if ls >= 1 else VERMELHO,
+                             sub="> 1 = mais comprados"), unsafe_allow_html=True)
+    else:
+        f2[1].markdown(_card("Long / Short", "—", sub="indisponível"),
+                       unsafe_allow_html=True)
+
+    # Gráfico: preço + médias móveis (SMA50 / EMA21)
+    serie = vt.get("serie_preco") or []
+    if serie:
+        n = min(int(pontos), len(serie))
+        dfc = pd.DataFrame({
+            "Preço": serie[-n:],
+            "SMA50": (vt.get("serie_sma50") or [None] * n)[-n:],
+            "EMA21": (vt.get("serie_ema21") or [None] * n)[-n:],
+        })
+        st.write("")
+        st.caption("Preço + médias móveis (últimos períodos)")
+        st.line_chart(dfc, height=260, color=[AZUL, LARANJA, ROXO])
 
 
-def _indef(modulo):
-    """Veredito vazio para um módulo que o usuário optou por NÃO rodar."""
-    return {"modulo": modulo, "direcao": "indefinido", "confianca": 0.0,
-            "raciocinio": "", "n_amostra": 0}
+tab_det, tab_geral = st.tabs(["🔎 Análise detalhada", "📊 Visão geral"])
 
+with tab_det:
+    if analisar and not usar_tecnica and not usar_fundamental:
+        st.warning("Marque ao menos uma análise (📈 Técnica e/ou 📰 Fundamental) "
+                   "na barra lateral.")
+    elif analisar:
+        with st.spinner("Analisando… (se as notícias estiverem ligadas, "
+                        "a pesquisa na web pode levar alguns segundos)"):
+            vt = (_tecnica(ativo, intervalo, int(horizonte), modo_teste)
+                  if usar_tecnica else _indef("tecnica"))
+            vf = (analise_fundamental(ativo, int(horizonte))
+                  if usar_fundamental else _indef("fundamental"))
+            final = sintetizar(vf, vt)
 
-if analisar and not usar_tecnica and not usar_fundamental:
-    st.warning("Marque ao menos uma análise (📈 Técnica e/ou 📰 Fundamental) "
-               "na barra lateral.")
-elif analisar:
-    with st.spinner("Analisando… (se as notícias estiverem ligadas, "
-                    "a pesquisa na web pode levar alguns segundos)"):
-        vt = (analise_tecnica(ativo, intervalo, int(horizonte), 600, modo_teste)
-              if usar_tecnica else _indef("tecnica"))
-        vf = (analise_fundamental(ativo, int(horizonte))
-              if usar_fundamental else _indef("fundamental"))
-        final = sintetizar(vf, vt)
+        # registra nos recentes (mais novo primeiro, sem repetir, máx. 4)
+        rec = [a for a in st.session_state["recentes"] if a != ativo]
+        st.session_state["recentes"] = ([ativo] + rec)[:4]
 
-    if usar_tecnica and vt.get("dados_sinteticos"):
-        st.warning("MODO TESTE: dados sintéticos — não refletem o mercado real.")
+        if usar_tecnica and vt.get("dados_sinteticos"):
+            st.warning("MODO TESTE: dados sintéticos — não refletem o mercado real.")
 
-    st.subheader(f"Veredito final — {ativo}")
-    cor_dir = COR_DIR.get(final["direcao"], "#0D1421")
-    c1, c2, c3 = st.columns(3)
-    c1.markdown(_card("Direção",
-                      f"{SETA.get(final['direcao'], '')} {final['direcao'].upper()}",
-                      cor=cor_dir), unsafe_allow_html=True)
-    c2.markdown(_card("Confiança", f"{final['confianca']:.2f}",
-                      sub="0 a 1 — teto baixo de propósito"), unsafe_allow_html=True)
-    c3.markdown(_card("Concordância", final["concordancia"].capitalize()),
-                unsafe_allow_html=True)
-    st.caption(final["resumo"])
-    st.write("")  # respiro
+        topo = f"Veredito final — {ativo}"
+        if usar_tecnica and vt.get("ultimo_candle"):
+            topo += f"  ·  vela mais recente: {vt['ultimo_candle']} (UTC)"
+        st.subheader(topo)
 
-    # Linha de métricas de preço só faz sentido quando a técnica rodou.
-    if usar_tecnica:
-        VERDE, VERMELHO, NEUTRO = "#16C784", "#EA3943", "#616E85"
-        cols = st.columns(4)
+        cor_dir = COR_DIR.get(final["direcao"], "#0D1421")
+        c1, c2, c3 = st.columns(3)
+        c1.markdown(_card("Direção",
+                          f"{SETA.get(final['direcao'], '')} {final['direcao'].upper()}",
+                          cor=cor_dir), unsafe_allow_html=True)
+        c2.markdown(_card("Confiança", f"{final['confianca']:.2f}",
+                          sub="0 a 1 — teto baixo de propósito"), unsafe_allow_html=True)
+        c3.markdown(_card("Concordância", final["concordancia"].capitalize()),
+                    unsafe_allow_html=True)
+        st.progress(min(max(float(final["confianca"]), 0.0), 1.0))
+        st.caption(final["resumo"])
+        st.write("")
 
-        # Preço + variação % do último período (verde/vermelho com seta)
-        var = vt.get("variacao_pct", 0.0)
-        cor_var = VERDE if var >= 0 else VERMELHO
-        seta_var = "▲" if var >= 0 else "▼"
-        sub_preco = (f"<span style='color:{cor_var};font-weight:600'>"
-                     f"{seta_var} {var:+.2f}%</span> no período")
-        cols[0].markdown(_card("Preço atual", f"${vt['preco_atual']:,.2f}", sub=sub_preco),
-                         unsafe_allow_html=True)
+        if usar_tecnica:
+            _bloco_metricas(vt)
 
-        # RSI colorido: vermelho sobrecomprado (>70), verde sobrevendido (<30)
-        rsi = vt["indicadores"]["rsi"]
-        if rsi > 70:
-            cor_rsi, zona = VERMELHO, "sobrecomprado"
-        elif rsi < 30:
-            cor_rsi, zona = VERDE, "sobrevendido"
+        st.divider()
+        col_f, col_t = st.columns(2)
+        with col_f:
+            st.markdown("### 📰 Veredito 1 — fundamental (notícias/macro)")
+            if not usar_fundamental:
+                st.info("Desativada nesta busca. Marque '📰 Fundamental' na barra "
+                        "lateral para incluir notícias e macro.")
+            else:
+                st.write(f"**Direção:** {vf['direcao']}  |  **Confiança:** {vf['confianca']}  "
+                         f"|  **Episódios análogos (n):** {vf.get('n_amostra', '-')}")
+                if vf.get("do_cache"):
+                    st.caption("↺ resultado reaproveitado do cache (não consumiu API)")
+                st.write(_texto_seguro(vf["raciocinio"]))
+                if vf.get("fontes"):
+                    st.markdown("**Fontes:**")
+                    for url in vf["fontes"][:8]:
+                        st.markdown(f"- [{url}]({url})")
+        with col_t:
+            st.markdown("### 📈 Veredito 2 — técnica")
+            if not usar_tecnica:
+                st.info("Desativada nesta busca. Marque '📈 Técnica' na barra "
+                        "lateral para incluir indicadores.")
+            else:
+                st.write(f"**Direção:** {vt['direcao']}  |  **Confiança:** {vt['confianca']}  "
+                         f"|  **Casos análogos (n):** {vt['n_amostra']}")
+                if vt.get("hist_pct_alta") is not None:
+                    st.caption(f"🕮 Histórico: em {vt['n_amostra']} casos parecidos, "
+                               f"subiu {vt['hist_pct_alta'] * 100:.0f}% das vezes "
+                               f"(confiança da amostra: {vt.get('hist_confianca', '-')}).")
+                st.write(_texto_seguro(vt["raciocinio"]))
+                with st.expander("Indicadores e futuros (detalhe)"):
+                    st.json({"indicadores": vt["indicadores"], "futuros": vt["futuros"]})
+
+        # Exportar resumo
+        resumo_txt = (
+            f"Agente Cripto — {ativo} ({intervalo}, horizonte {int(horizonte)})\n"
+            f"Vela mais recente: {vt.get('ultimo_candle', '-')} UTC\n\n"
+            f"VEREDITO FINAL: {final['direcao'].upper()} "
+            f"(confianca {final['confianca']:.2f}, {final['concordancia']})\n"
+            f"{final['resumo']}\n\n"
+            f"Tecnica: {vt['direcao']} (conf {vt.get('confianca', '-')}) — "
+            f"{vt.get('raciocinio', '')}\n\n"
+            f"Fundamental: {vf['direcao']} (conf {vf.get('confianca', '-')}) — "
+            f"{vf.get('raciocinio', '')}\n")
+        st.download_button("⬇️ Baixar resumo (.txt)", resumo_txt,
+                           file_name=f"{ativo}_analise.txt", mime="text/plain")
+
+        st.caption("⚠️ " + final["aviso"] +
+                   " Olhe sempre o raciocínio e o n_amostra, não só o número da confiança.")
+    else:
+        st.info("Escolha o ativo na barra lateral e clique em **🔎 Analisar**.")
+
+with tab_geral:
+    st.markdown("#### Comparar vários ativos de uma vez")
+    st.caption("Só a parte técnica (rápida, sem gastar API). Use o **Intervalo** "
+               "escolhido na barra lateral.")
+    sel = st.multiselect("Ativos para comparar", lista_ativos,
+                         default=POPULARES[:6], max_selections=15)
+    if st.button("📊 Comparar", type="primary"):
+        if not sel:
+            st.info("Escolha ao menos um ativo.")
         else:
-            cor_rsi, zona = NEUTRO, "neutro"
-        cols[1].markdown(_card("RSI", f"{rsi}", cor=cor_rsi, sub=zona), unsafe_allow_html=True)
+            linhas, prog = [], st.progress(0.0)
+            for i, a in enumerate(sel):
+                try:
+                    v = _tecnica_leve(a, intervalo, modo_teste)
+                    linhas.append({
+                        "Ativo": a.replace("USDT", ""),
+                        "Preço": v["preco_atual"],
+                        "Variação %": v.get("variacao_pct", 0.0),
+                        "RSI": v["indicadores"]["rsi"],
+                        "Direção": f"{SETA.get(v['direcao'], '')} {v['direcao']}",
+                        "Tendência": [x for x in (v.get("serie_preco") or []) if x is not None],
+                    })
+                except Exception:
+                    linhas.append({"Ativo": a.replace("USDT", ""), "Preço": None,
+                                   "Variação %": None, "RSI": None,
+                                   "Direção": "erro", "Tendência": []})
+                prog.progress((i + 1) / len(sel))
+            prog.empty()
+            st.dataframe(
+                pd.DataFrame(linhas), hide_index=True, width="stretch",
+                column_config={
+                    "Preço": st.column_config.NumberColumn(format="$%.4f"),
+                    "Variação %": st.column_config.NumberColumn(format="%.2f%%"),
+                    "RSI": st.column_config.NumberColumn(format="%.0f"),
+                    "Tendência": st.column_config.LineChartColumn("Tendência", width="medium"),
+                })
+            st.caption("⚠️ Pesquisa, não sinal de trade. Direção de 1 período é "
+                       "dominada por ruído — olhe o conjunto, não um número isolado.")
 
-        # MACD histograma: verde positivo / vermelho negativo
-        macd_h = vt["indicadores"]["macd_hist"]
-        cols[2].markdown(_card("MACD hist", f"{macd_h}",
-                               cor=VERDE if macd_h >= 0 else VERMELHO,
-                               sub="momentum"), unsafe_allow_html=True)
+with st.expander("❓ Como ler este painel"):
+    st.markdown("""
+- **Direção / Confiança / Concordância:** o veredito final junta a técnica e a fundamental.
+  Quando elas **discordam**, o resultado é `ambíguo` de propósito — é o sinal mais honesto.
+- **Confiança (0 a 1):** tem **teto baixo de propósito**. Direção de 1 período é dominada por
+  ruído, então um número alto seria desonesto. Olhe o **raciocínio** e o **n_amostra**.
+- **n_amostra:** em quantos casos históricos parecidos o agente está se baseando. Poucos casos
+  (amostra pequena) = pouca confiança, mesmo que os indicadores estejam alinhados.
+- **RSI:** força do movimento. > 70 = sobrecomprado (esticado pra cima), < 30 = sobrevendido.
+- **MACD hist:** momentum — positivo (verde) favorece alta, negativo (vermelho) favorece baixa.
+- **Funding / Long-Short / Open interest:** termômetro do mercado de futuros (posicionamento).
 
-        # Open interest (Binance local; OKX como reserva na nuvem)
-        oi = vt["futuros"].get("open_interest")
-        oi_var = vt["futuros"].get("oi_variacao")
-        oi_fonte = vt["futuros"].get("oi_fonte")
-        if oi_var is not None:
-            sub_oi = (f"<span style='color:{VERDE if oi_var >= 0 else VERMELHO}'>"
-                      f"{oi_var:+.1f}%</span> · {oi_fonte or ''}")
-        elif oi is not None:
-            sub_oi = f"via {oi_fonte}" if oi_fonte else "snapshot"
-        else:
-            sub_oi = "indisponível"
-        cols[3].markdown(_card("Open interest", f"{oi:,.0f}" if oi is not None else "—",
-                               sub=sub_oi), unsafe_allow_html=True)
-
-        # Mini-gráfico (sparkline) do preço recente
-        serie = vt.get("serie_preco")
-        if serie:
-            st.write("")
-            st.caption("Preço — últimos períodos")
-            cor_linha = VERDE if serie[-1] >= serie[0] else VERMELHO
-            st.line_chart(pd.DataFrame({"preço": serie}), height=150, color=cor_linha)
-
-    st.divider()
-    col_f, col_t = st.columns(2)
-    with col_f:
-        st.markdown("### 📰 Veredito 1 — fundamental (notícias/macro)")
-        if not usar_fundamental:
-            st.info("Desativada nesta busca. Marque '📰 Fundamental' na barra "
-                    "lateral para incluir notícias e macro.")
-        else:
-            st.write(f"**Direção:** {vf['direcao']}  |  **Confiança:** {vf['confianca']}  "
-                     f"|  **Episódios análogos (n):** {vf.get('n_amostra', '-')}")
-            if vf.get("do_cache"):
-                st.caption("↺ resultado reaproveitado do cache (não consumiu API)")
-            st.write(_texto_seguro(vf["raciocinio"]))
-            if vf.get("fontes"):
-                st.markdown("**Fontes:**")
-                for url in vf["fontes"][:8]:
-                    st.markdown(f"- [{url}]({url})")
-    with col_t:
-        st.markdown("### 📈 Veredito 2 — técnica")
-        if not usar_tecnica:
-            st.info("Desativada nesta busca. Marque '📈 Técnica' na barra "
-                    "lateral para incluir indicadores.")
-        else:
-            st.write(f"**Direção:** {vt['direcao']}  |  **Confiança:** {vt['confianca']}  "
-                     f"|  **Casos análogos (n):** {vt['n_amostra']}")
-            st.write(_texto_seguro(vt["raciocinio"]))
-            with st.expander("Indicadores e futuros (detalhe)"):
-                st.json({"indicadores": vt["indicadores"], "futuros": vt["futuros"]})
-
-    st.divider()
-    st.caption("⚠️ " + final["aviso"] +
-               " Olhe sempre o raciocínio e o n_amostra, não só o número da confiança.")
-else:
-    st.info("Escolha o ativo na barra lateral e clique em **Analisar**.")
+**Ferramenta de pesquisa, não recomendação de investimento.**
+""")

@@ -86,16 +86,18 @@ def obter_futuros(symbol="BTCUSDT", usar_teste=False):
     resultado = {"sintetico": False, "open_interest": None, "oi_variacao": None,
                  "oi_fonte": None}
 
-    # Funding rate
+    # Funding rate: Binance e, se falhar (nuvem), OKX.
+    resultado["funding_rate"] = None
     try:
         r = requests.get(f"{BASE_FUT}/fapi/v1/premiumIndex",
                          params={"symbol": symbol}, timeout=TIMEOUT)
         r.raise_for_status()
         resultado["funding_rate"] = float(r.json().get("lastFundingRate", 0))
     except Exception:
-        resultado["funding_rate"] = None
+        resultado["funding_rate"] = _funding_okx(symbol)
 
-    # Long/short ratio
+    # Long/short ratio: Binance e, se falhar, OKX.
+    resultado["long_short_ratio"] = None
     try:
         r = requests.get(f"{BASE_FUT}/futures/data/globalLongShortAccountRatio",
                          params={"symbol": symbol, "period": "1d", "limit": 1},
@@ -104,7 +106,7 @@ def obter_futuros(symbol="BTCUSDT", usar_teste=False):
         dados = r.json()
         resultado["long_short_ratio"] = float(dados[-1]["longShortRatio"]) if dados else None
     except Exception:
-        resultado["long_short_ratio"] = None
+        resultado["long_short_ratio"] = _long_short_okx(symbol)
 
     # Open interest: tenta Binance (ideal, com variacao) e, se falhar — tipico
     # quando o app roda num servidor nos EUA, onde a Binance de futuros bloqueia —
@@ -140,11 +142,15 @@ def _oi_binance(symbol):
             "oi_fonte": "Binance"}
 
 
+def _inst_okx(symbol):
+    base = symbol[:-4] if symbol.upper().endswith("USDT") else symbol
+    return f"{base.upper()}-USDT-SWAP", base.upper()
+
+
 def _oi_okx(symbol):
     """Open interest da OKX (reserva sem bloqueio geografico). So o valor — a OKX
     nao da a variacao nesse endpoint, entao oi_variacao fica None."""
-    base = symbol[:-4] if symbol.upper().endswith("USDT") else symbol
-    inst = f"{base.upper()}-USDT-SWAP"
+    inst, _ = _inst_okx(symbol)
     for host in ("https://www.okx.com", "https://aws.okx.com"):
         try:
             r = requests.get(f"{host}/api/v5/public/open-interest",
@@ -154,6 +160,38 @@ def _oi_okx(symbol):
             if data and data[0].get("oiCcy"):
                 return {"open_interest": round(float(data[0]["oiCcy"]), 2),
                         "oi_variacao": None, "oi_fonte": "OKX"}
+        except Exception:
+            continue
+    return None
+
+
+def _funding_okx(symbol):
+    """Funding rate atual via OKX (reserva)."""
+    inst, _ = _inst_okx(symbol)
+    for host in ("https://www.okx.com", "https://aws.okx.com"):
+        try:
+            r = requests.get(f"{host}/api/v5/public/funding-rate",
+                             params={"instId": inst}, timeout=TIMEOUT)
+            r.raise_for_status()
+            data = r.json().get("data") or []
+            if data and data[0].get("fundingRate") not in (None, ""):
+                return float(data[0]["fundingRate"])
+        except Exception:
+            continue
+    return None
+
+
+def _long_short_okx(symbol):
+    """Razao long/short de contas via OKX rubik (reserva)."""
+    _, ccy = _inst_okx(symbol)
+    for host in ("https://www.okx.com", "https://aws.okx.com"):
+        try:
+            r = requests.get(f"{host}/api/v5/rubik/stat/contracts/long-short-account-ratio",
+                             params={"ccy": ccy, "period": "1D"}, timeout=TIMEOUT)
+            r.raise_for_status()
+            data = r.json().get("data") or []
+            if data and len(data[0]) >= 2:
+                return round(float(data[0][1]), 4)  # [ts, ratio] mais recente
         except Exception:
             continue
     return None

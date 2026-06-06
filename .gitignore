@@ -4,6 +4,10 @@
 # Historico de analises (local, nao versionar)
 .hist/
 
+# Artefatos de investigacao/varredura (scripts e CSVs temporarios)
+_*.py
+_*.csv
+
 # Segredos do Streamlit (NUNCA subir a chave da API para o GitHub)
 .streamlit/secrets.toml
 

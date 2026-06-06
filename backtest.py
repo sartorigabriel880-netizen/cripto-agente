@@ -24,8 +24,11 @@ _FAIXAS = [("baixa (<0.20)", 0.0, 0.20),
 
 
 def backtestar(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
-               limite=600, passos=200, usar_teste=False):
-    """Roda o backtest e devolve métricas de acerto (sem look-ahead)."""
+               limite=600, passos=200, usar_teste=False, detalhar=False):
+    """Roda o backtest e devolve métricas de acerto (sem look-ahead).
+
+    detalhar=True inclui 'calls': lista de (confianca, acerto) por chamada,
+    para análises por limiar de confiança (ex.: varredura por edge)."""
     df, sintetico = obter_candles(symbol, intervalo, limite, usar_teste)
     df = adicionar_indicadores(df)
     df = df.reset_index(drop=True)
@@ -59,6 +62,7 @@ def backtestar(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
 
     n_chamadas = n_acertos = n_indef = subiu_total = 0
     faixas = {nome: {"n": 0, "acertos": 0} for nome, _, _ in _FAIXAS}
+    calls = []  # (confianca, acerto_bool) por chamada — para filtrar por limiar depois
 
     for i in range(inicio, fim):
         v = _avaliar(df.iloc[:i + 1], h, _FUTUROS_VAZIO, sintetico,
@@ -72,6 +76,7 @@ def backtestar(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
         acerto = (pred == "cima" and subiu) or (pred == "baixo" and not subiu)
         n_chamadas += 1
         n_acertos += int(acerto)
+        calls.append((float(conf), bool(acerto)))
         for nome, lo, hi in _FAIXAS:
             if lo <= conf < hi:
                 faixas[nome]["n"] += 1
@@ -85,7 +90,7 @@ def backtestar(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
     for f in faixas.values():
         f["acuracia"] = (f["acertos"] / f["n"]) if f["n"] else None
 
-    return {
+    resultado = {
         "symbol": symbol, "intervalo": intervalo, "horizonte": h,
         "n_avaliacoes": n_aval,
         "n_chamadas": n_chamadas,
@@ -97,3 +102,6 @@ def backtestar(symbol="BTCUSDT", intervalo="1d", horizonte_periodos=1,
         "por_confianca": faixas,
         "dados_sinteticos": sintetico,
     }
+    if detalhar:
+        resultado["calls"] = calls
+    return resultado
